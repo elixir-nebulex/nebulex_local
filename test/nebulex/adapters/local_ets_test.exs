@@ -5,7 +5,7 @@ defmodule Nebulex.Adapters.LocalEtsTest do
   use Nebulex.Adapters.LocalTest
   use Nebulex.Adapters.Local.CacheTestCase
 
-  import Nebulex.CacheCase, only: [setup_with_dynamic_cache: 3, wait_until: 1, t_sleep: 1]
+  import Nebulex.CacheCase, only: [setup_with_dynamic_cache: 3, t_sleep: 1]
 
   alias Nebulex.Adapter
   alias Nebulex.Adapters.Local.TestCache, as: Cache

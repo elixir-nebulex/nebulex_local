@@ -1,9 +1,10 @@
 defmodule NebulexAdaptersLocal.MixProject do
   use Mix.Project
 
-  @source_url "https://github.com/nebulex-project/nebulex_local"
-  @version "3.0.0-dev"
-  # @nbx_vsn "3.0.0"
+  @source_url "https://github.com/elixir-nebulex/nebulex_local"
+  @version "3.0.0-rc.1"
+  @nbx_tag "3.0.0-rc.1"
+  @nbx_vsn "3.0.0-rc.1"
 
   def project do
     [
@@ -14,13 +15,14 @@ defmodule NebulexAdaptersLocal.MixProject do
       deps: deps(),
 
       # Testing
-      test_coverage: [tool: ExCoveralls],
+      test_coverage: [tool: ExCoveralls, export: "test-coverage"],
       preferred_cli_env: [
-        check: :test,
         coveralls: :test,
         "coveralls.detail": :test,
         "coveralls.post": :test,
-        "coveralls.html": :test
+        "coveralls.html": :test,
+        "coveralls.json": :test,
+        "test.ci": :test
       ],
 
       # Dialyzer
@@ -60,7 +62,7 @@ defmodule NebulexAdaptersLocal.MixProject do
       {:benchee_html, "~> 1.0", only: [:dev, :test]},
 
       # Docs
-      {:ex_doc, "~> 0.32", only: [:dev, :test], runtime: false}
+      {:ex_doc, "~> 0.36", only: [:dev, :test], runtime: false}
     ]
   end
 
@@ -68,7 +70,7 @@ defmodule NebulexAdaptersLocal.MixProject do
     if path = System.get_env("NEBULEX_PATH") do
       {:nebulex, path: path}
     else
-      {:nebulex, github: "cabol/nebulex", branch: "v3.0.0-dev"}
+      {:nebulex, "~> #{@nbx_vsn}"}
     end
   end
 
@@ -76,9 +78,9 @@ defmodule NebulexAdaptersLocal.MixProject do
     [
       "nbx.setup": [
         "cmd rm -rf nebulex",
-        "cmd git clone --depth 1 --branch v3.0.0-dev https://github.com/cabol/nebulex"
+        "cmd git clone --depth 1 --branch v#{@nbx_tag} https://github.com/elixir-nebulex/nebulex"
       ],
-      check: [
+      "test.ci": [
         "compile --warnings-as-errors",
         "format --check-formatted",
         "credo --strict",
@@ -92,12 +94,10 @@ defmodule NebulexAdaptersLocal.MixProject do
   defp package do
     [
       name: :nebulex_local,
-      maintainers: [
-        "Carlos Bolanos",
-        "Felipe Ripoll"
-      ],
+      maintainers: ["Carlos Bolanos"],
       licenses: ["MIT"],
-      links: %{"GitHub" => @source_url}
+      links: %{"GitHub" => @source_url},
+      files: ~w(lib .formatter.exs mix.exs README* CHANGELOG* LICENSE*)
     ]
   end
 

@@ -11,6 +11,7 @@ defmodule Nebulex.Adapters.Local.CacheTestCase do
       use Nebulex.Cache.QueryableTest
       use Nebulex.Cache.QueryableExpirationTest
       use Nebulex.Cache.TransactionTest
+      use Nebulex.Cache.ObservableTest
     end
   end
 end

@@ -1,16 +1,12 @@
 # Nebulex Local
 > A generational local cache adapter for [Nebulex][Nebulex].
 
-[Nebulex]: https://github.com/cabol/nebulex
+[Nebulex]: http://github.com/cabol/nebulex
 
-![CI](https://github.com/nebulex-project/nebulex_local/workflows/CI/badge.svg)
-[![Coverage Status](https://coveralls.io/repos/github/nebulex-project/nebulex_local/badge.svg?branch=main)](https://coveralls.io/github/nebulex-project/nebulex_local?branch=main)
-[![Hex Version](https://img.shields.io/hexpm/v/nebulex_local.svg)](https://hex.pm/packages/nebulex_local)
-[![Docs](https://img.shields.io/badge/docs-hexpm-blue.svg)](https://hexdocs.pm/nebulex_local)
-
-See the [online documentation][online_docs] for more information.
-
-[online_docs]: https://hexdocs.pm/nebulex_local/
+![CI](http://github.com/elixir-nebulex/nebulex_local/workflows/CI/badge.svg)
+[![Codecov](http://codecov.io/gh/elixir-nebulex/nebulex_local/graph/badge.svg)](http://codecov.io/gh/elixir-nebulex/nebulex_local/graph/badge.svg)
+[![Hex Version](http://img.shields.io/hexpm/v/nebulex_local.svg)](http://hex.pm/packages/nebulex_local)
+[![Documentation](http://img.shields.io/badge/Documentation-ff69b4)](http://hexdocs.pm/nebulex_local)
 
 ## Installation
 
@@ -19,7 +15,7 @@ Add `:nebulex_local` to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:nebulex_local, "~> 3.0"}
+    {:nebulex_local, "~> 3.0.0-rc.1"}
   ]
 end
 ```
@@ -65,11 +61,13 @@ end
 
 See the [online documentation][online_docs] for more information.
 
+[online_docs]: http://hexdocs.pm/nebulex_local/
+
 ## Testing
 
-Since `Nebulex.Adapters.Local` uses the support modules and shared tests
-from `Nebulex` and by default its test folder is not included in the Hex
-dependency, the following steps are required for running the tests.
+Since this adapter uses support modules and shared tests from `Nebulex`,
+but the test folder is not included in the Hex dependency, the following
+steps are required to run the tests.
 
 First of all, make sure you set the environment variable `NEBULEX_PATH`
 to `nebulex`:
@@ -114,7 +112,7 @@ the directory [benchmarks](./benchmarks).
 To run a benchmark test you have to run:
 
 ```
-$ MIX_ENV=test mix run benchmarks/{BENCH_TEST_FILE}
+$ MIX_ENV=test mix run benchmarks/BENCH_TEST_FILE
 ```
 
 Where `BENCH_TEST_FILE` can be any of:
@@ -132,23 +130,23 @@ $ MIX_ENV=test mix run benchmarks/local_with_shards_bench.exs
 ```
 
 Additionally, you can also run performance tests using `:basho_bench`.
-See [nebulex_bench example](https://github.com/cabol/nebulex_examples/tree/master/nebulex_bench)
+See [nebulex_bench example](http://github.com/elixir-nebulex/nebulex_examples/tree/master/nebulex_bench)
 for more information.
 
 ## Contributing
 
 Contributions to Nebulex are very welcome and appreciated!
 
-Use the [issue tracker](https://github.com/nebulex-project/nebulex_local/issues)
+Use the [issue tracker](https://github.com/elixir-nebulex/nebulex_local/issues)
 for bug reports or feature requests. Open a
-[pull request](https://github.com/nebulex-project/nebulex_local/pulls)
+[pull request](https://github.com/elixir-nebulex/nebulex_local/pulls)
 when you are ready to contribute.
 
 When submitting a pull request you should not update the
 [CHANGELOG.md](CHANGELOG.md), and also make sure you test your changes
 thoroughly, include unit tests alongside new or changed code.
 
-Before to submit a PR it is highly recommended to run `mix check` and ensure
+Before to submit a PR it is highly recommended to run `mix test.ci` and ensure
 all checks run successfully.
 
 ## Copyright and License

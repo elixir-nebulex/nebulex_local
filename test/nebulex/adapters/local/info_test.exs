@@ -1,5 +1,5 @@
 defmodule Nebulex.Adapters.Local.InfoTest do
-  use ExUnit.Case, asyc: true
+  use ExUnit.Case, async: true
 
   import Nebulex.CacheCase
 
@@ -73,7 +73,7 @@ defmodule Nebulex.Adapters.Local.InfoTest do
     end
   end
 
-  ## Provate functions
+  ## Private functions
 
   defp server_info do
     adapter_meta = Adapter.lookup_meta(Cache)
