@@ -9,7 +9,7 @@ on:
       - main
 
 jobs:
-  nebulex_test:
+  test:
     name: >-
       Nebulex.Adapters.Local Test (Elixir ${{ matrix.elixir }} /
       OTP ${{ matrix.otp }} /
@@ -19,14 +19,13 @@ jobs:
     strategy:
       matrix:
         include:
-          - elixir: 1.17.x
+          - elixir: 1.18.x
             otp: 27.x
             os: 'ubuntu-latest'
             style: true
             coverage: true
             sobelow: true
             dialyzer: true
-            doctor: true
           - elixir: 1.17.x
             otp: 26.x
             os: 'ubuntu-latest'
@@ -42,6 +41,7 @@ jobs:
 
     env:
       GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}'
+      CODECOV_TOKEN: '${{ secrets.CODECOV_TOKEN }}'
       MIX_ENV: test
       NEBULEX_PATH: nebulex
 
@@ -99,7 +99,14 @@ jobs:
         if: ${{ !matrix.coverage }}
 
       - name: Run tests with coverage
-        run: mix coveralls.github
+        run: mix coveralls.json
+        if: ${{ matrix.coverage }}
+
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          fail_ci_if_error: true
+          flags: unittests-elixir-${{ matrix.elixir }}-otp-${{ matrix.otp }}
         if: ${{ matrix.coverage }}
 
       - name: Restore PLT Cache

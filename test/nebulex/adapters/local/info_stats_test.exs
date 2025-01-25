@@ -1,5 +1,5 @@
 defmodule Nebulex.Adapters.Local.InfoStatsTest do
-  use ExUnit.Case, asyc: true
+  use ExUnit.Case, async: true
   use Mimic
 
   defmodule Cache do
@@ -11,7 +11,7 @@ defmodule Nebulex.Adapters.Local.InfoStatsTest do
 
   import Nebulex.CacheCase
 
-  alias alias Nebulex.Adapters.Common.Info.Stats
+  alias Nebulex.Adapters.Common.Info.Stats
 
   ## Tests
 
