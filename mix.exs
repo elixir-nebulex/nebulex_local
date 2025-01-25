@@ -1,7 +1,7 @@
 defmodule NebulexAdaptersLocal.MixProject do
   use Mix.Project
 
-  @source_url "https://github.com/nebulex-project/nebulex_local"
+  @source_url "https://github.com/elixir-nebulex/nebulex_local"
   @version "3.0.0-dev"
   # @nbx_vsn "3.0.0"
 
@@ -14,13 +14,14 @@ defmodule NebulexAdaptersLocal.MixProject do
       deps: deps(),
 
       # Testing
-      test_coverage: [tool: ExCoveralls],
+      test_coverage: [tool: ExCoveralls, export: "test-coverage"],
       preferred_cli_env: [
         check: :test,
         coveralls: :test,
         "coveralls.detail": :test,
         "coveralls.post": :test,
-        "coveralls.html": :test
+        "coveralls.html": :test,
+        "coveralls.json": :test
       ],
 
       # Dialyzer
@@ -60,7 +61,7 @@ defmodule NebulexAdaptersLocal.MixProject do
       {:benchee_html, "~> 1.0", only: [:dev, :test]},
 
       # Docs
-      {:ex_doc, "~> 0.32", only: [:dev, :test], runtime: false}
+      {:ex_doc, "~> 0.36", only: [:dev, :test], runtime: false}
     ]
   end
 
@@ -68,7 +69,7 @@ defmodule NebulexAdaptersLocal.MixProject do
     if path = System.get_env("NEBULEX_PATH") do
       {:nebulex, path: path}
     else
-      {:nebulex, github: "cabol/nebulex", branch: "v3.0.0-dev"}
+      {:nebulex, github: "elixir-nebulex/nebulex", branch: "v3.0.0-dev"}
     end
   end
 
@@ -76,7 +77,7 @@ defmodule NebulexAdaptersLocal.MixProject do
     [
       "nbx.setup": [
         "cmd rm -rf nebulex",
-        "cmd git clone --depth 1 --branch v3.0.0-dev https://github.com/cabol/nebulex"
+        "cmd git clone --depth 1 --branch v3.0.0-dev https://github.com/elixir-nebulex/nebulex"
       ],
       check: [
         "compile --warnings-as-errors",
@@ -92,10 +93,7 @@ defmodule NebulexAdaptersLocal.MixProject do
   defp package do
     [
       name: :nebulex_local,
-      maintainers: [
-        "Carlos Bolanos",
-        "Felipe Ripoll"
-      ],
+      maintainers: ["Carlos Bolanos"],
       licenses: ["MIT"],
       links: %{"GitHub" => @source_url}
     ]

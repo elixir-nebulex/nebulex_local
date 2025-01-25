@@ -4,6 +4,7 @@ defmodule Nebulex.Adapters.LocalEtsTest do
   # Inherit tests
   use Nebulex.Adapters.LocalTest
   use Nebulex.Adapters.Local.CacheTestCase
+  use Nebulex.Cache.ObservableTest
 
   import Nebulex.CacheCase, only: [setup_with_dynamic_cache: 3, wait_until: 1, t_sleep: 1]
 
