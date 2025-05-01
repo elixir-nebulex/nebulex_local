@@ -30,7 +30,7 @@ defmodule Nebulex.Adapters.Local do
       See `Nebulex.Adapter.Transaction`.
     * Support for stats.
 
-  [gc]: http://hexdocs.pm/nebulex/Nebulex.Adapters.Local.Generation.html
+  [gc]: http://hexdocs.pm/nebulex/3.0.0-rc.1/Nebulex.Adapters.Local.Generation.html
 
   ## Configuration options
 

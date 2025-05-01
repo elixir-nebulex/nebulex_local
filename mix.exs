@@ -1,7 +1,7 @@
 defmodule NebulexAdaptersLocal.MixProject do
   use Mix.Project
 
-  @source_url "https://github.com/elixir-nebulex/nebulex_local"
+  @source_url "http://github.com/elixir-nebulex/nebulex_local"
   @version "3.0.0-rc.1"
   @nbx_tag "3.0.0-rc.1"
   @nbx_vsn "3.0.0-rc.1"
@@ -78,7 +78,7 @@ defmodule NebulexAdaptersLocal.MixProject do
     [
       "nbx.setup": [
         "cmd rm -rf nebulex",
-        "cmd git clone --depth 1 --branch v#{@nbx_tag} https://github.com/elixir-nebulex/nebulex"
+        "cmd git clone --depth 1 --branch v#{@nbx_tag} http://github.com/elixir-nebulex/nebulex"
       ],
       "test.ci": [
         "compile --warnings-as-errors",
