@@ -1,5 +1,25 @@
 # Changelog
 
+## [v3.0.0-rc.2](https://github.com/elixir-nebulex/nebulex_local/tree/v3.0.0-rc.2) (2025-10-06)
+> [Full Changelog](https://github.com/elixir-nebulex/nebulex_local/compare/v3.0.0-rc.1...v3.0.0-rc.2)
+
+### Enhancements
+
+- [Nebulex.Adapters.Local] Improved generation garbage collection performance by
+  deleting ETS tables directly instead of flushing all objects first. This
+  change significantly improves GC performance for large caches, reducing
+  generation deletion from O(n) to O(1) complexity. The deprecated generation
+  is now deleted after a grace period defined by the new `:gc_cleanup_delay`
+  option (formerly `:gc_flush_delay`), which allows ongoing operations to
+  complete safely before table removal.
+
+### Backwards incompatible changes
+
+- [Nebulex.Adapters.Local] Renamed `:gc_flush_delay` option to
+  `:gc_cleanup_delay` to better reflect its purpose. The option now controls
+  the delay before the deprecated generation is deleted (not just flushed).
+  Please update your configuration accordingly.
+
 ## [v3.0.0-rc.1](https://github.com/elixir-nebulex/nebulex_local/tree/v3.0.0-rc.1) (2025-05-01)
 > [Full Changelog](https://github.com/elixir-nebulex/nebulex_local/compare/b7b9c8924f0c4cbfa37c84bdbc152b23aaed067c...v3.0.0-rc.1)
 

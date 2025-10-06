@@ -20,7 +20,7 @@ defmodule Nebulex.Adapters.LocalTest do
       end
 
       test "because cache is stopped", %{cache: cache, name: name} do
-        :ok = cache.stop()
+        :ok = stop_supervised!(name)
 
         ops = [
           fn -> cache.put(1, 13) end,

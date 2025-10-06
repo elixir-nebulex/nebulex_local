@@ -52,17 +52,17 @@ defmodule NebulexAdaptersLocal.MixProject do
       {:excoveralls, "~> 0.18", only: :test},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
-      {:sobelow, "~> 0.13", only: [:dev, :test], runtime: false},
-      {:stream_data, "~> 1.1", only: [:dev, :test]},
-      {:mimic, "~> 1.9", only: :test},
-      {:ex2ms, "~> 1.6", only: :test},
+      {:sobelow, "~> 0.14", only: [:dev, :test], runtime: false},
+      {:stream_data, "~> 1.2", only: [:dev, :test]},
+      {:mimic, "~> 2.1", only: :test},
+      {:ex2ms, "~> 1.7", only: :test},
 
       # Benchmark Test
-      {:benchee, "~> 1.3", only: [:dev, :test]},
+      {:benchee, "~> 1.4", only: [:dev, :test]},
       {:benchee_html, "~> 1.0", only: [:dev, :test]},
 
       # Docs
-      {:ex_doc, "~> 0.36", only: [:dev, :test], runtime: false}
+      {:ex_doc, "~> 0.38", only: [:dev, :test], runtime: false}
     ]
   end
 
@@ -70,7 +70,7 @@ defmodule NebulexAdaptersLocal.MixProject do
     if path = System.get_env("NEBULEX_PATH") do
       {:nebulex, path: path}
     else
-      {:nebulex, github: "elixir-nebulex/nebulex"}
+      {:nebulex, github: "elixir-nebulex/nebulex", branch: "main"}
     end
   end
 

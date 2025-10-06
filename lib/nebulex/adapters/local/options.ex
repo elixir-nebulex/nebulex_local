@@ -135,13 +135,14 @@ defmodule Nebulex.Adapters.Local.Options do
       > configure one of `:max_size` or `:allocated_memory` (or both).
       """
     ],
-    gc_flush_delay: [
+    gc_cleanup_delay: [
       type: :pos_integer,
       required: false,
       default: :timer.seconds(10),
       doc: """
-      The delay in milliseconds before objects from the oldest generation
-      are flushed.
+      The delay in milliseconds before the oldest generation is deleted.
+      This grace period allows ongoing operations to complete before the
+      generation is removed.
       """
     ]
   ]

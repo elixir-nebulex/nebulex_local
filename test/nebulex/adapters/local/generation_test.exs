@@ -97,238 +97,244 @@ defmodule Nebulex.Adapters.Local.GenerationTest do
     end
   end
 
-  describe "gc" do
-    setup_with_dynamic_cache Cache,
-                             :gc_test,
-                             backend: :shards,
-                             gc_interval: 1000,
-                             compressed: true
+  for backend <- [:ets, :shards] do
+    describe "(#{backend} gc" do
+      setup_with_dynamic_cache Cache,
+                               :gc_test,
+                               backend: unquote(backend),
+                               gc_interval: 1000,
+                               compressed: true
 
-    test "create generations", %{cache: cache, name: name} do
-      assert generations_len(name) == 1
+      test "create generations", %{cache: cache, name: name} do
+        assert generations_len(name) == 1
 
-      :ok = Process.sleep(1020)
-      assert generations_len(name) == 2
+        :ok = Process.sleep(1020)
+        assert generations_len(name) == 2
 
-      assert cache.delete_all!() == 0
+        assert cache.delete_all!() == 0
 
-      :ok = Process.sleep(1020)
-      assert generations_len(name) == 2
-    end
-
-    test "create new generation and reset timeout", %{cache: cache, name: name} do
-      assert generations_len(name) == 1
-
-      :ok = Process.sleep(800)
-
-      cache.with_dynamic_cache(name, fn ->
-        cache.new_generation()
-      end)
-
-      assert generations_len(name) == 2
-
-      :ok = Process.sleep(500)
-      assert generations_len(name) == 2
-
-      :ok = Process.sleep(520)
-      assert generations_len(name) == 2
-    end
-
-    test "create new generation without reset timeout", %{cache: cache, name: name} do
-      assert generations_len(name) == 1
-
-      :ok = Process.sleep(800)
-
-      cache.with_dynamic_cache(name, fn ->
-        cache.new_generation(gc_interval_reset: false)
-      end)
-
-      assert generations_len(name) == 2
-
-      :ok = Process.sleep(500)
-      assert generations_len(name) == 2
-    end
-
-    test "reset GC interval", %{cache: cache, name: name} do
-      assert generations_len(name) == 1
-
-      :ok = Process.sleep(800)
-
-      cache.with_dynamic_cache(name, fn ->
-        cache.reset_gc_interval()
-      end)
-
-      :ok = Process.sleep(220)
-      assert generations_len(name) == 1
-
-      :ok = Process.sleep(1000)
-      assert generations_len(name) == 2
-    end
-  end
-
-  describe "allocated memory" do
-    test "healthcheck is triggered when max generation size is reached" do
-      {:ok, _pid} =
-        LocalWithSizeLimit.start_link(
-          gc_interval: :timer.hours(1),
-          gc_memory_check_interval: &__MODULE__.mem_check_interval/3,
-          allocated_memory: 100_000,
-          gc_flush_delay: 1
-        )
-
-      assert generations_len(LocalWithSizeLimit) == 1
-
-      {mem_size, _} = Generation.memory_info(LocalWithSizeLimit)
-      :ok = Generation.realloc(LocalWithSizeLimit, mem_size * 2)
-
-      # Trigger the healthcheck event
-      :ok = check_cache_size(LocalWithSizeLimit, 1000)
-
-      assert generations_len(LocalWithSizeLimit) == 1
-      assert_mem_size(:<=)
-
-      :ok = flood_cache(mem_size, mem_size * 2)
-
-      # Wait until the mem is less than the max (healthcheck has run many times)
-      wait_until(fn ->
-        assert generations_len(LocalWithSizeLimit) == 2
-        assert_mem_size(:<=)
-      end)
-
-      :ok = flood_cache(mem_size, mem_size * 2)
-
-      wait_until(fn ->
-        assert generations_len(LocalWithSizeLimit) == 2
-        assert_mem_size(:>)
-      end)
-
-      :ok = flood_cache(mem_size, mem_size * 2)
-
-      wait_until(fn ->
-        assert generations_len(LocalWithSizeLimit) == 2
-        assert_mem_size(:>)
-      end)
-
-      # Trigger the healthcheck event
-      :ok = Enum.each(1..3, fn _ -> check_cache_size(LocalWithSizeLimit) end)
-
-      wait_until(fn ->
-        assert generations_len(LocalWithSizeLimit) == 2
-        assert_mem_size(:<=)
-      end)
-
-      :ok = LocalWithSizeLimit.stop()
-    end
-
-    test "healthcheck while cache is being used" do
-      {:ok, _pid} =
-        LocalWithSizeLimit.start_link(
-          gc_interval: :timer.hours(1),
-          gc_memory_check_interval: :timer.seconds(1),
-          allocated_memory: 100
-        )
-
-      assert generations_len(LocalWithSizeLimit) == 1
-
-      tasks = for i <- 1..3, do: Task.async(fn -> task_fun(LocalWithSizeLimit, i) end)
-
-      for _ <- 1..100 do
-        :ok = Process.sleep(10)
-
-        LocalWithSizeLimit
-        |> Generation.server()
-        |> send(:healthcheck)
+        :ok = Process.sleep(1020)
+        assert generations_len(name) == 2
       end
 
-      :ok = Enum.each(tasks, &Task.shutdown/1)
+      test "create new generation and reset timeout", %{cache: cache, name: name} do
+        assert generations_len(name) == 1
 
-      :ok = LocalWithSizeLimit.stop()
-    end
-  end
+        :ok = Process.sleep(800)
 
-  describe "max size" do
-    test "healthcheck is triggered when size limit is reached" do
-      {:ok, _pid} =
-        LocalWithSizeLimit.start_link(
-          gc_interval: :timer.hours(1),
-          max_size: 3,
-          gc_memory_check_interval: :timer.seconds(1)
-        )
+        cache.with_dynamic_cache(name, fn ->
+          cache.new_generation()
+        end)
 
-      # Initially there should be only 1 generation and no entries
-      assert generations_len(LocalWithSizeLimit) == 1
-      assert LocalWithSizeLimit.count_all!() == 0
+        assert generations_len(name) == 2
 
-      # Put some entries to exceed the max size
-      _ = cache_put(LocalWithSizeLimit, 1..4)
+        :ok = Process.sleep(500)
+        assert generations_len(name) == 2
 
-      # Validate current size
-      assert LocalWithSizeLimit.count_all!() == 4
+        :ok = Process.sleep(520)
+        assert generations_len(name) == 2
+      end
 
-      # Wait the max healthcheck timeout
-      :ok = Process.sleep(1600)
+      test "create new generation without reset timeout", %{cache: cache, name: name} do
+        assert generations_len(name) == 1
 
-      # There should be 2 generation now
-      assert generations_len(LocalWithSizeLimit) == 2
+        :ok = Process.sleep(800)
 
-      # The entries should be now in the older generation
-      assert LocalWithSizeLimit.count_all!() == 4
+        cache.with_dynamic_cache(name, fn ->
+          cache.new_generation(gc_interval_reset: false)
+        end)
 
-      # Wait the min healthcheck timeout since max size is exceeded
-      :ok = Process.sleep(1100)
+        assert generations_len(name) == 2
 
-      # Cache should be empty now
-      assert LocalWithSizeLimit.count_all!() == 0
+        :ok = Process.sleep(500)
+        assert generations_len(name) == 2
+      end
 
-      # Put some entries without exceeding the max size
-      _ = cache_put(LocalWithSizeLimit, 5..6)
+      test "reset GC interval", %{cache: cache, name: name} do
+        assert generations_len(name) == 1
 
-      # Validate current size
-      assert LocalWithSizeLimit.count_all!() == 2
+        :ok = Process.sleep(800)
 
-      # Wait the max healthcheck timeout
-      :ok = Process.sleep(1600)
+        cache.with_dynamic_cache(name, fn ->
+          cache.reset_gc_interval()
+        end)
 
-      # The entries should be in the newer generation yet
-      assert LocalWithSizeLimit.count_all!() == 2
+        :ok = Process.sleep(220)
+        assert generations_len(name) == 1
 
-      # Put some entries to exceed the max size
-      _ = cache_put(LocalWithSizeLimit, 7..8)
-
-      # Wait the max healthcheck timeout
-      :ok = Process.sleep(1600)
-
-      # The entries should be in the newer generation yet
-      assert LocalWithSizeLimit.count_all!() == 4
-
-      # Wait the min healthcheck timeout since max size is exceeded
-      :ok = Process.sleep(1100)
-
-      # Cache should be empty now
-      assert LocalWithSizeLimit.count_all!() == 0
-
-      # Stop the cache
-      :ok = LocalWithSizeLimit.stop()
+        :ok = Process.sleep(1000)
+        assert generations_len(name) == 2
+      end
     end
 
-    test "healthcheck works ok when gc_interval not set or is nil" do
-      {:ok, _pid} =
-        LocalWithSizeLimit.start_link(
-          max_size: 3,
-          gc_memory_check_interval: :timer.seconds(1)
-        )
+    describe "(#{backend} allocated memory" do
+      test "healthcheck is triggered when max generation size is reached" do
+        {:ok, _pid} =
+          LocalWithSizeLimit.start_link(
+            gc_interval: :timer.hours(1),
+            gc_memory_check_interval: &__MODULE__.mem_check_interval/3,
+            allocated_memory: 100_000,
+            gc_cleanup_delay: 1,
+            backend: unquote(backend)
+          )
 
-      # Put some entries to exceed the max size
-      _ = cache_put(LocalWithSizeLimit, 1..4)
+        assert generations_len(LocalWithSizeLimit) == 1
 
-      # Wait the max healthcheck timeout
-      :ok = Process.sleep(1600)
+        {mem_size, _} = Generation.memory_info(LocalWithSizeLimit)
+        :ok = Generation.realloc(LocalWithSizeLimit, mem_size * 2)
 
-      # Assert not crashed
-      assert LocalWithSizeLimit.count_all!() == 4
+        # Trigger the healthcheck event
+        :ok = check_cache_size(LocalWithSizeLimit, 1000)
 
-      # Stop the cache
-      :ok = LocalWithSizeLimit.stop()
+        assert generations_len(LocalWithSizeLimit) == 1
+        assert_mem_size(:<=)
+
+        :ok = flood_cache(mem_size, mem_size * 2)
+
+        # Wait until the mem is less than the max (healthcheck has run many times)
+        wait_until(fn ->
+          assert generations_len(LocalWithSizeLimit) == 2
+          assert_mem_size(:<=)
+        end)
+
+        :ok = flood_cache(mem_size, mem_size * 2)
+
+        wait_until(fn ->
+          assert generations_len(LocalWithSizeLimit) == 2
+          assert_mem_size(:>)
+        end)
+
+        :ok = flood_cache(mem_size, mem_size * 2)
+
+        wait_until(fn ->
+          assert generations_len(LocalWithSizeLimit) == 2
+          assert_mem_size(:>)
+        end)
+
+        # Trigger the healthcheck event
+        :ok = Enum.each(1..3, fn _ -> check_cache_size(LocalWithSizeLimit) end)
+
+        wait_until(fn ->
+          assert generations_len(LocalWithSizeLimit) == 2
+          assert_mem_size(:<=)
+        end)
+
+        :ok = LocalWithSizeLimit.stop()
+      end
+
+      test "healthcheck while cache is being used" do
+        {:ok, _pid} =
+          LocalWithSizeLimit.start_link(
+            gc_interval: :timer.hours(1),
+            gc_memory_check_interval: :timer.seconds(1),
+            allocated_memory: 100,
+            backend: unquote(backend)
+          )
+
+        assert generations_len(LocalWithSizeLimit) == 1
+
+        tasks = for i <- 1..3, do: Task.async(fn -> task_fun(LocalWithSizeLimit, i) end)
+
+        for _ <- 1..100 do
+          :ok = Process.sleep(10)
+
+          LocalWithSizeLimit
+          |> Generation.server()
+          |> send(:healthcheck)
+        end
+
+        :ok = Enum.each(tasks, &Task.shutdown/1)
+
+        :ok = LocalWithSizeLimit.stop()
+      end
+    end
+
+    describe "(#{backend} max size" do
+      test "healthcheck is triggered when size limit is reached" do
+        {:ok, _pid} =
+          LocalWithSizeLimit.start_link(
+            gc_interval: :timer.hours(1),
+            max_size: 3,
+            gc_memory_check_interval: :timer.seconds(1),
+            backend: unquote(backend)
+          )
+
+        # Initially there should be only 1 generation and no entries
+        assert generations_len(LocalWithSizeLimit) == 1
+        assert LocalWithSizeLimit.count_all!() == 0
+
+        # Put some entries to exceed the max size
+        _ = cache_put(LocalWithSizeLimit, 1..4)
+
+        # Validate current size
+        assert LocalWithSizeLimit.count_all!() == 4
+
+        # Wait the max healthcheck timeout
+        :ok = Process.sleep(1600)
+
+        # There should be 2 generation now
+        assert generations_len(LocalWithSizeLimit) == 2
+
+        # The entries should be now in the older generation
+        assert LocalWithSizeLimit.count_all!() == 4
+
+        # Wait the min healthcheck timeout since max size is exceeded
+        :ok = Process.sleep(1100)
+
+        # Cache should be empty now
+        assert LocalWithSizeLimit.count_all!() == 0
+
+        # Put some entries without exceeding the max size
+        _ = cache_put(LocalWithSizeLimit, 5..6)
+
+        # Validate current size
+        assert LocalWithSizeLimit.count_all!() == 2
+
+        # Wait the max healthcheck timeout
+        :ok = Process.sleep(1600)
+
+        # The entries should be in the newer generation yet
+        assert LocalWithSizeLimit.count_all!() == 2
+
+        # Put some entries to exceed the max size
+        _ = cache_put(LocalWithSizeLimit, 7..8)
+
+        # Wait the max healthcheck timeout
+        :ok = Process.sleep(1600)
+
+        # The entries should be in the newer generation yet
+        assert LocalWithSizeLimit.count_all!() == 4
+
+        # Wait the min healthcheck timeout since max size is exceeded
+        :ok = Process.sleep(1100)
+
+        # Cache should be empty now
+        assert LocalWithSizeLimit.count_all!() == 0
+
+        # Stop the cache
+        :ok = LocalWithSizeLimit.stop()
+      end
+
+      test "healthcheck works ok when gc_interval not set or is nil" do
+        {:ok, _pid} =
+          LocalWithSizeLimit.start_link(
+            max_size: 3,
+            gc_memory_check_interval: :timer.seconds(1),
+            backend: unquote(backend)
+          )
+
+        # Put some entries to exceed the max size
+        _ = cache_put(LocalWithSizeLimit, 1..4)
+
+        # Wait the max healthcheck timeout
+        :ok = Process.sleep(1600)
+
+        # Assert not crashed
+        assert LocalWithSizeLimit.count_all!() == 4
+
+        # Stop the cache
+        :ok = LocalWithSizeLimit.stop()
+      end
     end
   end
 

@@ -7,10 +7,7 @@ defmodule Nebulex.Adapters.Local.Backend do
       alias Nebulex.Adapters.Local.Generation
 
       defp generation_spec(opts) do
-        %{
-          id: Module.concat([__MODULE__, GC]),
-          start: {Generation, :start_link, [opts]}
-        }
+        Supervisor.child_spec({Generation, opts}, id: Module.concat([__MODULE__, GC]))
       end
 
       defp sup_spec(children) do
