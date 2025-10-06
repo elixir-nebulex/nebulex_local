@@ -51,6 +51,8 @@ defmodule Nebulex.Adapters.Local.Generation do
   alias Nebulex.Adapters.Local.{Backend, Metadata, Options}
   alias Nebulex.Telemetry
 
+  import Nebulex.Adapters.Local, only: [with_retry: 1]
+
   @type t() :: %__MODULE__{}
   @type server_ref() :: pid() | atom() | :ets.tid()
   @type opts() :: Nebulex.Cache.opts()
@@ -285,9 +287,11 @@ defmodule Nebulex.Adapters.Local.Generation do
     :ok = new_gen(state)
 
     :ok =
-      state.meta_tab
-      |> list()
-      |> Enum.each(&state.backend.delete_all_objects(&1))
+      with_retry(fn ->
+        state.meta_tab
+        |> list()
+        |> Enum.each(&state.backend.delete_all_objects(&1))
+      end)
 
     {:reply, :ok, %{state | gc_heartbeat_ref: maybe_reset_heartbeat(true, state)}}
   end
@@ -358,7 +362,10 @@ defmodule Nebulex.Adapters.Local.Generation do
           backend: backend
         } = state
       ) do
-    _ = Backend.delete(backend, meta_tab, gen_tab)
+    _ =
+      with_retry(fn ->
+        Backend.delete(backend, meta_tab, gen_tab)
+      end)
 
     {:noreply, state}
   end
@@ -409,8 +416,11 @@ defmodule Nebulex.Adapters.Local.Generation do
         # operations
         _ref = Process.send_after(self(), {:cleanup_older_gen, older}, gc_cleanup_delay)
 
+        # Get size of older generation
+        size = with_retry(fn -> backend.info(older, :size) end)
+
         # Since the older generation is deleted, update evictions count
-        :ok = Stats.incr(stats_counter, :evictions, backend.info(older, :size))
+        :ok = Stats.incr(stats_counter, :evictions, size)
 
       [newer] ->
         # Update generations
@@ -498,19 +508,23 @@ defmodule Nebulex.Adapters.Local.Generation do
   end
 
   defp size_info(backend, meta_tab) do
-    meta_tab
-    |> list()
-    |> Enum.reduce(0, &(backend.info(&1, :size) + &2))
+    with_retry(fn ->
+      meta_tab
+      |> list()
+      |> Enum.reduce(0, &(backend.info(&1, :size) + &2))
+    end)
   end
 
   defp memory_info(backend, meta_tab) do
-    meta_tab
-    |> list()
-    |> Enum.reduce(0, fn gen, acc ->
-      gen
-      |> backend.info(:memory)
-      |> Kernel.*(:erlang.system_info(:wordsize))
-      |> Kernel.+(acc)
+    with_retry(fn ->
+      meta_tab
+      |> list()
+      |> Enum.reduce(0, fn gen, acc ->
+        gen
+        |> backend.info(:memory)
+        |> Kernel.*(:erlang.system_info(:wordsize))
+        |> Kernel.+(acc)
+      end)
     end)
   end
 end
