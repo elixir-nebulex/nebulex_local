@@ -367,10 +367,12 @@ defmodule Nebulex.Adapters.Local do
 
   @impl true
   def fetch(%{name: name, meta_tab: meta_tab, backend: backend}, key, _opts) do
-    meta_tab
-    |> list_gen()
-    |> do_fetch(name, backend, key)
-    |> return(:value)
+    with_retry(fn ->
+      meta_tab
+      |> list_gen()
+      |> do_fetch(name, backend, key)
+      |> return(:value)
+    end)
   end
 
   defp do_fetch([newer], name, backend, key) do
@@ -391,8 +393,10 @@ defmodule Nebulex.Adapters.Local do
     now = Time.now()
     entry = entry(key: key, value: value, touched: now, exp: exp(now, ttl))
 
-    do_put(on_write, adapter_meta.meta_tab, adapter_meta.backend, entry, keep_ttl?)
-    |> wrap_ok()
+    with_retry(fn ->
+      do_put(on_write, adapter_meta.meta_tab, adapter_meta.backend, entry, keep_ttl?)
+      |> wrap_ok()
+    end)
   end
 
   defp do_put(:put, meta_tab, backend, entry, keep_ttl?) do
@@ -420,14 +424,16 @@ defmodule Nebulex.Adapters.Local do
     now = Time.now()
     exp = exp(now, ttl)
 
-    do_put_all(
-      on_write,
-      adapter_meta.meta_tab,
-      adapter_meta.backend,
-      adapter_meta.purge_chunk_size,
-      Enum.map(entries, &entry(key: elem(&1, 0), value: elem(&1, 1), touched: now, exp: exp))
-    )
-    |> wrap_ok()
+    with_retry(fn ->
+      do_put_all(
+        on_write,
+        adapter_meta.meta_tab,
+        adapter_meta.backend,
+        adapter_meta.purge_chunk_size,
+        Enum.map(entries, &entry(key: elem(&1, 0), value: elem(&1, 1), touched: now, exp: exp))
+      )
+      |> wrap_ok()
+    end)
   end
 
   defp do_put_all(:put, meta_tab, backend, chunk_size, entries) do
@@ -440,13 +446,21 @@ defmodule Nebulex.Adapters.Local do
 
   @impl true
   def delete(adapter_meta, key, _opts) do
-    adapter_meta.meta_tab
-    |> list_gen()
-    |> Enum.each(&adapter_meta.backend.delete(&1, key))
+    with_retry(fn ->
+      adapter_meta.meta_tab
+      |> list_gen()
+      |> Enum.each(&adapter_meta.backend.delete(&1, key))
+    end)
   end
 
   @impl true
   def take(%{name: name, meta_tab: meta_tab, backend: backend}, key, _opts) do
+    with_retry(fn ->
+      do_take(meta_tab, backend, name, key)
+    end)
+  end
+
+  defp do_take(meta_tab, backend, name, key) do
     meta_tab
     |> list_gen()
     |> Enum.reduce_while(nil, fn gen, _acc ->
@@ -466,24 +480,26 @@ defmodule Nebulex.Adapters.Local do
         ttl,
         _opts
       ) do
-    # Current time
-    now = Time.now()
+    with_retry(fn ->
+      # Current time
+      now = Time.now()
 
-    # Verify if the key has expired
-    _ =
+      # Verify if the key has expired
+      _ =
+        meta_tab
+        |> list_gen()
+        |> do_fetch(name, backend, key)
+
+      # Run the counter operation
       meta_tab
-      |> list_gen()
-      |> do_fetch(name, backend, key)
-
-    # Run the counter operation
-    meta_tab
-    |> newer_gen()
-    |> backend.update_counter(
-      key,
-      {3, amount},
-      entry(key: key, value: default, touched: now, exp: exp(now, ttl))
-    )
-    |> wrap_ok()
+      |> newer_gen()
+      |> backend.update_counter(
+        key,
+        {3, amount},
+        entry(key: key, value: default, touched: now, exp: exp(now, ttl))
+      )
+      |> wrap_ok()
+    end)
   end
 
   @impl true
@@ -496,9 +512,11 @@ defmodule Nebulex.Adapters.Local do
 
   @impl true
   def ttl(%{name: name, meta_tab: meta_tab, backend: backend}, key, _opts) do
-    with {:ok, res} <- meta_tab |> list_gen() |> do_fetch(name, backend, key) do
-      {:ok, entry_ttl(res)}
-    end
+    with_retry(fn ->
+      with {:ok, res} <- meta_tab |> list_gen() |> do_fetch(name, backend, key) do
+        {:ok, entry_ttl(res)}
+      end
+    end)
   end
 
   defp entry_ttl(entry(exp: :infinity)), do: :infinity
@@ -515,112 +533,126 @@ defmodule Nebulex.Adapters.Local do
   def expire(adapter_meta, key, ttl, _opts) do
     now = Time.now()
 
-    adapter_meta.meta_tab
-    |> update_entry(adapter_meta.backend, key, [{4, now}, {5, exp(now, ttl)}])
-    |> wrap_ok()
+    with_retry(fn ->
+      adapter_meta.meta_tab
+      |> update_entry(adapter_meta.backend, key, [{4, now}, {5, exp(now, ttl)}])
+      |> wrap_ok()
+    end)
   end
 
   @impl true
   def touch(adapter_meta, key, _opts) do
-    adapter_meta.meta_tab
-    |> update_entry(adapter_meta.backend, key, [{4, Time.now()}])
-    |> wrap_ok()
+    with_retry(fn ->
+      adapter_meta.meta_tab
+      |> update_entry(adapter_meta.backend, key, [{4, Time.now()}])
+      |> wrap_ok()
+    end)
   end
 
   ## Nebulex.Adapter.Queryable
 
   @impl true
-  def execute(adapter_meta, query_meta, opts)
+  def execute(adapter_meta, query_meta, opts) do
+    do_execute(adapter_meta, query_meta, opts)
+  end
 
-  def execute(_adapter_meta, %{op: :get_all, query: {:in, []}}, _opts) do
+  defp do_execute(_adapter_meta, %{op: :get_all, query: {:in, []}}, _opts) do
     {:ok, []}
   end
 
-  def execute(_adapter_meta, %{op: op, query: {:in, []}}, _opts)
-      when op in [:count_all, :delete_all] do
+  defp do_execute(_adapter_meta, %{op: op, query: {:in, []}}, _opts)
+       when op in [:count_all, :delete_all] do
     {:ok, 0}
   end
 
-  def execute(
-        %{meta_tab: meta_tab, backend: backend},
-        %{op: :count_all, query: {:q, nil}},
-        _opts
-      ) do
-    meta_tab
-    |> list_gen()
-    |> Enum.reduce(0, fn gen, acc ->
-      gen
-      |> backend.info(:size)
-      |> Kernel.+(acc)
+  defp do_execute(
+         %{meta_tab: meta_tab, backend: backend},
+         %{op: :count_all, query: {:q, nil}},
+         _opts
+       ) do
+    with_retry(fn ->
+      meta_tab
+      |> list_gen()
+      |> Enum.reduce(0, fn gen, acc ->
+        gen
+        |> backend.info(:size)
+        |> Kernel.+(acc)
+      end)
+      |> wrap_ok()
     end)
-    |> wrap_ok()
   end
 
-  def execute(
-        %{meta_tab: meta_tab} = adapter_meta,
-        %{op: :delete_all, query: {:q, nil}} = query_spec,
-        _opts
-      ) do
-    with {:ok, count_all} <- execute(adapter_meta, %{query_spec | op: :count_all}, []) do
+  defp do_execute(
+         %{meta_tab: meta_tab} = adapter_meta,
+         %{op: :delete_all, query: {:q, nil}} = query_spec,
+         _opts
+       ) do
+    with {:ok, count_all} <- do_execute(adapter_meta, %{query_spec | op: :count_all}, []) do
       :ok = Generation.delete_all(meta_tab)
 
       {:ok, count_all}
     end
   end
 
-  def execute(
-        %{meta_tab: meta_tab, backend: backend},
-        %{op: :count_all, query: {:in, keys}},
-        opts
-      )
-      when is_list(keys) do
+  defp do_execute(
+         %{meta_tab: meta_tab, backend: backend},
+         %{op: :count_all, query: {:in, keys}},
+         opts
+       )
+       when is_list(keys) do
     chunk_size = Keyword.get(opts, :chunk_size, 10)
 
-    meta_tab
-    |> list_gen()
-    |> Enum.reduce(0, fn gen, acc ->
-      do_count_all(backend, gen, keys, chunk_size) + acc
+    with_retry(fn ->
+      meta_tab
+      |> list_gen()
+      |> Enum.reduce(0, fn gen, acc ->
+        do_count_all(backend, gen, keys, chunk_size) + acc
+      end)
+      |> wrap_ok()
     end)
-    |> wrap_ok()
   end
 
-  def execute(
-        %{meta_tab: meta_tab, backend: backend},
-        %{op: :delete_all, query: {:in, keys}},
-        opts
-      )
-      when is_list(keys) do
+  defp do_execute(
+         %{meta_tab: meta_tab, backend: backend},
+         %{op: :delete_all, query: {:in, keys}},
+         opts
+       )
+       when is_list(keys) do
     chunk_size = Keyword.get(opts, :chunk_size, 10)
 
-    meta_tab
-    |> list_gen()
-    |> Enum.reduce(0, fn gen, acc ->
-      do_delete_all(backend, gen, keys, chunk_size) + acc
+    with_retry(fn ->
+      meta_tab
+      |> list_gen()
+      |> Enum.reduce(0, fn gen, acc ->
+        do_delete_all(backend, gen, keys, chunk_size) + acc
+      end)
+      |> wrap_ok()
     end)
-    |> wrap_ok()
   end
 
-  def execute(
-        %{meta_tab: meta_tab, backend: backend},
-        %{op: :get_all, query: {:in, keys}, select: select},
-        opts
-      )
-      when is_list(keys) do
+  defp do_execute(
+         %{meta_tab: meta_tab, backend: backend},
+         %{op: :get_all, query: {:in, keys}, select: select},
+         opts
+       )
+       when is_list(keys) do
     chunk_size = Keyword.get(opts, :chunk_size, 10)
 
-    meta_tab
-    |> list_gen()
-    |> Enum.reduce([], fn gen, acc ->
-      do_get_all(backend, gen, keys, match_return(select), chunk_size) ++ acc
+    with_retry(fn ->
+      meta_tab
+      |> list_gen()
+      |> Enum.reduce([], fn gen, acc ->
+        do_get_all(backend, gen, keys, match_return(select), chunk_size) ++ acc
+      end)
+      |> wrap_ok()
     end)
-    |> wrap_ok()
   end
 
-  def execute(
-        %{meta_tab: meta_tab, backend: backend},
-        %{op: op, query: {:q, ms}, select: select},
-        _opts
-      ) do
+  defp do_execute(
+         %{meta_tab: meta_tab, backend: backend},
+         %{op: op, query: {:q, ms}, select: select},
+         _opts
+       ) do
     ms =
       ms
       |> assert_match_spec(select)
@@ -633,16 +665,24 @@ defmodule Nebulex.Adapters.Local do
         :delete_all -> {&(backend.select_delete(&1, ms) + &2), 0}
       end
 
-    meta_tab
-    |> list_gen()
-    |> Enum.reduce(acc_in, reducer)
-    |> wrap_ok()
+    with_retry(fn ->
+      meta_tab
+      |> list_gen()
+      |> Enum.reduce(acc_in, reducer)
+      |> wrap_ok()
+    end)
   end
 
   @impl true
-  def stream(adapter_meta, query_meta, opts)
+  def stream(adapter_meta, query_meta, opts) do
+    do_stream(adapter_meta, query_meta, opts)
+  end
 
-  def stream(%{meta_tab: meta_tab, backend: backend}, %{query: {:in, keys}, select: select}, opts) do
+  defp do_stream(
+         %{meta_tab: meta_tab, backend: backend},
+         %{query: {:in, keys}, select: select},
+         opts
+       ) do
     keys
     |> Stream.chunk_every(Keyword.fetch!(opts, :max_entries))
     |> Stream.map(fn chunk ->
@@ -654,16 +694,16 @@ defmodule Nebulex.Adapters.Local do
     |> wrap_ok()
   end
 
-  def stream(adapter_meta, %{query: {:q, ms}, select: select}, opts) do
+  defp do_stream(adapter_meta, %{query: {:q, ms}, select: select}, opts) do
     adapter_meta
-    |> do_stream(
+    |> build_stream(
       assert_match_spec(ms, select),
       Keyword.get(opts, :max_entries, 20)
     )
     |> wrap_ok()
   end
 
-  defp do_stream(%{meta_tab: meta_tab, backend: backend}, match_spec, page_size) do
+  defp build_stream(%{meta_tab: meta_tab, backend: backend}, match_spec, page_size) do
     Stream.resource(
       fn ->
         [newer | _] = generations = list_gen(meta_tab)
@@ -726,6 +766,23 @@ defmodule Nebulex.Adapters.Local do
 
   # Inline common instructions
   @compile {:inline, fetch_entry: 4, pop_entry: 4, list_gen: 1, newer_gen: 1, match_key: 2}
+
+  @max_retries 3
+  def with_retry(fun, retries \\ @max_retries)
+
+  def with_retry(fun, 0) do
+    fun.()
+  end
+
+  def with_retry(fun, retries) when retries > 0 do
+    fun.()
+  rescue
+    ArgumentError ->
+      # Retry will force fetching fresh generation references
+      :ok = Process.sleep(10)
+
+      with_retry(fun, retries - 1)
+  end
 
   defmacrop backend_call(name, backend, tab, fun, key) do
     quote do

@@ -12,6 +12,14 @@
   is now deleted after a grace period defined by the new `:gc_cleanup_delay`
   option (formerly `:gc_flush_delay`), which allows ongoing operations to
   complete safely before table removal.
+  [#2](https://github.com/elixir-nebulex/nebulex_local/issues/2).
+- [Nebulex.Adapters.Local] Added automatic retry logic to handle race conditions
+  when accessing deleted generations during garbage collection. Operations now
+  retry up to 3 times when encountering `ArgumentError` due to deleted ETS
+  tables, automatically fetching fresh generation references. This prevents
+  crashes and improves resilience during GC cycles, especially under high
+  concurrency.
+  [#3](https://github.com/elixir-nebulex/nebulex_local/issues/3).
 
 ### Backwards incompatible changes
 
