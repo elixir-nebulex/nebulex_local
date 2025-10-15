@@ -126,7 +126,7 @@ defmodule Nebulex.Adapters.LocalDuplicateKeysTest do
 
         test_ms =
           fun do
-            {_, key, value, _, _} when value == 2 -> key
+            {_, key, value, _, _, _} when value == 2 -> key
           end
 
         res_stream = cache.stream!(query: test_ms, select: :key) |> Enum.to_list() |> Enum.sort()

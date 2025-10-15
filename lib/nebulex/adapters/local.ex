@@ -29,8 +29,76 @@ defmodule Nebulex.Adapters.Local do
     * Support for transactions via Erlang global name registration facility.
       See `Nebulex.Adapter.Transaction`.
     * Support for stats.
+    * Automatic retry logic for handling race conditions during garbage
+      collection (see [Concurrency and resilience](#module-concurrency-and-resilience)).
 
   [gc]: http://hexdocs.pm/nebulex/3.0.0-rc.1/Nebulex.Adapters.Local.Generation.html
+
+  ## Concurrency and resilience
+
+  The local adapter implements automatic retry logic to handle race conditions
+  that may occur when accessing ETS tables during garbage collection cycles.
+  When the garbage collector deletes an old generation, processes holding
+  references to that generation's ETS table may encounter `ArgumentError`
+  exceptions when attempting to access it.
+
+  To ensure resilience and prevent crashes, all cache operations automatically
+  retry up to **3 times** when encountering such errors. The retry mechanism:
+
+    * **Catches `ArgumentError` exceptions** that occur due to deleted ETS
+      tables.
+    * **Re-fetches fresh generation references** from the metadata table.
+    * **Retries the operation** with the updated references.
+    * **Prevents infinite loops** by limiting retries to a maximum of 3
+      attempts.
+    * **Adds a small delay** (10ms) between retries to allow GC operations
+      to complete.
+
+  This behavior is transparent to users and ensures that:
+
+    * Operations remain reliable even under high concurrency.
+    * Cache operations succeed despite concurrent generation changes.
+    * No manual error handling is required for GC-related race conditions.
+    * The system gracefully handles generation transitions.
+
+  ### The role of `:gc_cleanup_delay`
+
+  It's important to note that while the automatic retry logic provides an extra
+  layer of safety, **race conditions are unlikely to occur in practice** due to
+  the `:gc_cleanup_delay` configuration option (defaults to 10 seconds).
+
+  When garbage collection runs and creates a new generation, the old generation
+  is not deleted immediately. Instead, it's kept alive for the duration
+  specified by `:gc_cleanup_delay`. This grace period allows ongoing operations
+  that hold references to the old generation to complete successfully before the
+  table is actually deleted.
+
+  The automatic retry mechanism serves as a **safeguard** for edge cases where:
+
+    * Operations take longer than the cleanup delay.
+    * Extremely high concurrency scenarios.
+    * Systems under heavy load.
+
+  **Recommendation**: Configure `:gc_cleanup_delay` with a reasonable timeout
+  (the default 10 seconds is appropriate for most use cases). This ensures
+  concurrent operations have sufficient time to transition gracefully, making
+  the retry mechanism rarely necessary.
+
+  ### Example scenario
+
+  Consider this race condition scenario:
+
+  1. **Process A** fetches generation references and starts a `fetch/2`
+    operation.
+  2. **Process B** (GC) deletes the old generation while Process A is accessing
+    it.
+  3. **Process A** encounters an `ArgumentError` when trying to access the
+    deleted table.
+  4. **Automatic retry** catches the error, fetches fresh generation references,
+    and retries.
+  5. **Operation succeeds** using the updated generation references.
+
+  > **This automatic retry logic applies to ALL cache operations.**
 
   ## Configuration options
 
@@ -181,22 +249,118 @@ defmodule Nebulex.Adapters.Local do
   However, there are some predefined or shorthand queries you can use. See the
   ["Predefined queries"](#module-predefined-queries) section for information.
 
-  The adapter defines an entry as a tuple `{:entry, key, value, touched, ttl}`,
+  The adapter defines an entry as a tuple `{:entry, key, value, touched, ttl, tag}`,
   meaning the match pattern within the ETS Match Spec must be like
-  `{:entry, :"$1", :"$2", :"$3", :"$4"}`. To make query building easier,
+  `{:entry, :"$1", :"$2", :"$3", :"$4", :"$5"}`. To make query building easier,
   you can use the `Ex2ms` library.
 
+      # Using raw ETS match spec
       iex> match_spec = [
       ...>   {
-      ...>     {:entry, :"$1", :"$2", :_, :_},
+      ...>     {:entry, :"$1", :"$2", :_, :_, :_},
       ...>     [{:>, :"$2", 1}],
       ...>     [{{:"$1", :"$2"}}]
       ...>   }
       ...> ]
       iex> MyCache.get_all(query: match_spec)
-      {:ok, [b: 1, c: 3]}
+      {:ok, [{:b, 2}, {:c, 3}]}
+
+      # Using Ex2ms for easier query building
+      iex> import Ex2ms
+      iex> match_spec = fun do
+      ...>   {_, key, value, _, _, _} when value > 1 -> {key, value}
+      ...> end
+      iex> MyCache.get_all(query: match_spec)
+      {:ok, [{:b, 2}, {:c, 3}]}
 
   > You can use the `Ex2ms` or `MatchSpec` library to build queries easier.
+
+  ## Tagging entries
+
+  The local adapter supports tagging cache entries with arbitrary terms via the
+  `:tag` option. Tags provide a powerful way to organize and query cache entries
+  by associating metadata with them. This is especially useful for:
+
+    * **Logical grouping** - Group related entries (e.g., all entries for a
+      specific user, session, or feature).
+    * **Selective invalidation** - Delete all entries with a specific tag
+      without affecting other cached data.
+    * **Efficient filtering** - Query entries by tag using ETS match specs.
+
+  ### Tagging entries
+
+  You can tag entries when using `put/3`, `put!/3`, `put_all/2`, `put_all!/2`,
+  and related operations:
+
+      # Tag a single entry
+      MyCache.put("user:123:profile", user_data, tag: :user_123)
+
+      # Tag multiple entries at once
+      MyCache.put_all([
+        {"session:abc:data", session_data},
+        {"session:abc:prefs", preferences}
+      ], tag: :session_abc)
+
+      # Different tags for different entry groups
+      MyCache.put_all([a: 1, b: 2, c: 3], tag: :group_a)
+      MyCache.put_all([d: 4, e: 5, f: 6], tag: :group_b)
+
+  When you don't provide a tag, entries are stored with a `nil` tag value.
+
+  ### Querying by tag
+
+  To query entries by tag, use ETS match specifications with the entry pattern
+  `{:entry, key, value, touched, ttl, tag}` where the tag is in the 6th
+  position:
+
+      # Using Ex2ms for easier query building
+      import Ex2ms
+
+      # Get all values for entries with a specific tag
+      match_spec = fun do
+        {_, _, value, _, _, tag} when tag == :group_a -> value
+      end
+
+      MyCache.get_all!(query: match_spec, select: :value)
+      #=> [1, 2, 3]
+
+      # Delete all entries with a specific tag
+      MyCache.delete_all!(query: match_spec)
+
+      # Query entries with multiple tags
+      match_spec = fun do
+        {_, key, value, _, _, tag} when tag == :group_a or tag == :group_b ->
+          {key, value}
+      end
+
+      MyCache.get_all!(query: match_spec, select: {:key, :value})
+      #=> [{:a, 1}, {:b, 2}, {:c, 3}, {:d, 4}, {:e, 5}, {:f, 6}]
+
+  ### Practical example
+
+  Here's a complete example showing how to use tags for user session management:
+
+      # Store user session data with tags
+      user_id = 123
+      session_id = "abc-def-ghi"
+
+      MyCache.put_all([
+        {"user:\#{user_id}:profile", user_profile},
+        {"user:\#{user_id}:settings", user_settings},
+        {"user:\#{user_id}:permissions", permissions}
+      ], tag: {:user, user_id})
+
+      # Later, invalidate all data for this user
+      import Ex2ms
+
+      invalidate_user = fun do
+        {_, _, _, _, _, tag} when tag == {:user, 123} -> true
+      end
+
+      MyCache.delete_all!(query: invalidate_user)
+
+  Tags can be any Elixir term (atoms, tuples, strings, etc.), giving you
+  flexibility in how you organize your cache entries.
 
   ## Transaction API
 
@@ -282,7 +446,8 @@ defmodule Nebulex.Adapters.Local do
     key: nil,
     value: nil,
     touched: nil,
-    exp: nil
+    exp: nil,
+    tag: nil
   )
 
   ## Nebulex.Adapter
@@ -389,21 +554,22 @@ defmodule Nebulex.Adapters.Local do
   end
 
   @impl true
-  def put(adapter_meta, key, value, on_write, ttl, keep_ttl?, _opts) do
+  def put(adapter_meta, key, value, on_write, ttl, keep_ttl?, opts) do
     now = Time.now()
-    entry = entry(key: key, value: value, touched: now, exp: exp(now, ttl))
+    {has_tag?, tag} = get_tag(opts)
+    entry = entry(key: key, value: value, touched: now, exp: exp(now, ttl), tag: tag)
 
     with_retry(fn ->
-      do_put(on_write, adapter_meta.meta_tab, adapter_meta.backend, entry, keep_ttl?)
+      do_put(on_write, adapter_meta.meta_tab, adapter_meta.backend, entry, keep_ttl?, has_tag?)
       |> wrap_ok()
     end)
   end
 
-  defp do_put(:put, meta_tab, backend, entry, keep_ttl?) do
+  defp do_put(:put, meta_tab, backend, entry, keep_ttl?, _has_tag?) do
     put_entry(meta_tab, backend, entry, keep_ttl?)
   end
 
-  defp do_put(:put_new, meta_tab, backend, entry, _keep_ttl?) do
+  defp do_put(:put_new, meta_tab, backend, entry, _keep_ttl?, _has_tag?) do
     put_new_entries(meta_tab, backend, entry)
   end
 
@@ -411,18 +577,21 @@ defmodule Nebulex.Adapters.Local do
          :replace,
          meta_tab,
          backend,
-         entry(key: key, value: value, touched: touched, exp: exp),
-         keep_ttl?
+         entry(key: key, value: value, touched: touched, exp: exp, tag: tag),
+         keep_ttl?,
+         has_tag?
        ) do
-    changes = if keep_ttl?, do: [], else: [{4, touched}, {5, exp}]
+    changes = if has_tag?, do: [], else: [{6, tag}]
+    changes = if keep_ttl?, do: changes, else: [{4, touched}, {5, exp}]
 
     update_entry(meta_tab, backend, key, [{3, value} | changes])
   end
 
   @impl true
-  def put_all(adapter_meta, entries, on_write, ttl, _opts) do
+  def put_all(adapter_meta, entries, on_write, ttl, opts) do
     now = Time.now()
     exp = exp(now, ttl)
+    {_has_tag?, tag} = get_tag(opts)
 
     with_retry(fn ->
       do_put_all(
@@ -430,7 +599,10 @@ defmodule Nebulex.Adapters.Local do
         adapter_meta.meta_tab,
         adapter_meta.backend,
         adapter_meta.purge_chunk_size,
-        Enum.map(entries, &entry(key: elem(&1, 0), value: elem(&1, 1), touched: now, exp: exp))
+        Enum.map(
+          entries,
+          &entry(key: elem(&1, 0), value: elem(&1, 1), touched: now, exp: exp, tag: tag)
+        )
       )
       |> wrap_ok()
     end)
@@ -807,6 +979,13 @@ defmodule Nebulex.Adapters.Local do
     end
   end
 
+  defp get_tag(opts) do
+    case Keyword.fetch(opts, :tag) do
+      {:ok, tag} -> {true, tag}
+      :error -> {false, nil}
+    end
+  end
+
   defp fetch_entry(name, backend, tab, key) do
     backend_call(name, backend, tab, :lookup, key)
   end
@@ -936,6 +1115,7 @@ defmodule Nebulex.Adapters.Local do
               {3, value}, acc -> entry(acc, value: value)
               {4, value}, acc -> entry(acc, touched: value)
               {5, value}, acc -> entry(acc, exp: value)
+              {6, value}, acc -> entry(acc, tag: value)
             end)
 
           backend.insert(newer_gen, entry)
@@ -1075,7 +1255,7 @@ defmodule Nebulex.Adapters.Local do
   defp assert_match_spec(spec, select) when spec in [nil, :expired] do
     [
       {
-        entry(key: :"$1", value: :"$2", touched: :"$3", exp: :"$4"),
+        entry(key: :"$1", value: :"$2", touched: :"$3", exp: :"$4", tag: :"$5"),
         [comp_match_spec(spec)],
         [match_return(select)]
       }

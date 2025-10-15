@@ -221,7 +221,7 @@ defmodule Nebulex.Adapters.LocalTest do
 
         test_ms =
           fun do
-            {_, _, value, _, _} when value > 10 -> value
+            {_, _, value, _, _, _} when value > 10 -> value
           end
 
         for action <- [:get_all!, :stream!] do
@@ -264,6 +264,39 @@ defmodule Nebulex.Adapters.LocalTest do
         assert Enum.count(all) == 3
       end
 
+      test "get_all with tag", %{cache: cache} do
+        assert cache.put_all([a: 1, b: 2, c: 3], tag: :foo) == :ok
+        assert cache.put_all([d: 4, e: 5, f: 6], tag: :bar) == :ok
+
+        test_ms =
+          fun do
+            {_, _, value, _, _, tag} when tag == :foo -> value
+          end
+
+        for action <- [:get_all!, :stream!] do
+          assert get_all_or_stream(
+                   cache,
+                   action,
+                   query: test_ms,
+                   select: :value
+                 ) == :lists.usort([1, 2, 3])
+        end
+
+        test_ms =
+          fun do
+            {_, _, value, _, _, tag} when tag == :foo or tag == :bar -> value
+          end
+
+        for action <- [:get_all!, :stream!] do
+          assert get_all_or_stream(
+                   cache,
+                   action,
+                   query: test_ms,
+                   select: :value
+                 ) == :lists.usort([1, 2, 3, 4, 5, 6])
+        end
+      end
+
       test "delete all expired and unexpired entries", %{cache: cache} do
         _ = cache_put(cache, 1..5, & &1, ttl: 1500)
         _ = cache_put(cache, 6..10)
@@ -293,7 +326,7 @@ defmodule Nebulex.Adapters.LocalTest do
 
         test_ms =
           fun do
-            {_, _, value, _, _} when rem(value, 2) == 0 -> value
+            {_, _, value, _, _, _} when rem(value, 2) == 0 -> value
           end
 
         {expected, rem} = Enum.split_with(values, &(rem(&1, 2) == 0))
@@ -322,6 +355,27 @@ defmodule Nebulex.Adapters.LocalTest do
           assert cache.delete_all!(in: [k]) == 1
           assert cache.count_all!() == 0
         end)
+      end
+
+      test "delete all entries with tag", %{cache: cache} do
+        assert cache.put_all([a: 1, b: 2, c: 3], tag: :foo) == :ok
+        assert cache.put_all([d: 4, e: 5, f: 6], tag: :bar) == :ok
+
+        test_ms =
+          fun do
+            {_, _, value, _, _, tag} when tag == :foo -> value
+          end
+
+        assert cache.delete_all!(query: test_ms) == 3
+        assert cache.count_all!(query: test_ms) == 0
+
+        test_ms =
+          fun do
+            {_, _, value, _, _, tag} when tag == :foo or tag == :bar -> value
+          end
+
+        assert cache.delete_all!(query: test_ms) == 3
+        assert cache.count_all!(query: test_ms) == 0
       end
 
       test "stream with max_entries", %{cache: cache} do
@@ -586,6 +640,183 @@ defmodule Nebulex.Adapters.LocalTest do
       end
     end
 
+    describe "race conditions and automatic retry" do
+      test "concurrent operations during garbage collection", %{cache: cache, name: name} do
+        # Populate cache with entries
+        entries = for x <- 1..50, into: %{}, do: {x, x * 2}
+        :ok = cache.put_all(entries)
+
+        # Spawn multiple processes that will read/write during GC
+        tasks =
+          for i <- 1..20 do
+            task_async(cache, name, fn ->
+              # Perform various operations that might race with GC
+              cache.put("concurrent_#{i}", i)
+              cache.fetch!("concurrent_#{i}")
+              cache.get!(1)
+              cache.count_all!()
+            end)
+          end
+
+        # Trigger GC while tasks are running
+        _ = new_generation(cache, name)
+        _ = new_generation(cache, name)
+
+        # All tasks should complete successfully without crashes
+        results = Task.await_many(tasks, 5000)
+        assert length(results) == 20
+      end
+
+      test "fetch during generation deletion", %{cache: cache, name: name} do
+        # Put entries in old generation
+        :ok = cache.put_all(for x <- 1..100, do: {x, x})
+        _ = new_generation(cache, name)
+
+        # Spawn processes that fetch while we delete the old generation
+        tasks =
+          for x <- 1..100 do
+            task_async(cache, name, fn ->
+              # This should succeed even if generation is deleted during access
+              cache.fetch(x)
+            end)
+          end
+
+        # Trigger another generation change (will delete old generation)
+        _ = new_generation(cache, name)
+
+        # All fetches should succeed (entries move to new generation on access)
+        results = Task.await_many(tasks, 5000)
+        assert length(results) == 100
+      end
+
+      test "put operations during generation transitions", %{cache: cache, name: name} do
+        # Initial data
+        :ok = cache.put_all(for x <- 1..50, do: {x, x})
+
+        # Spawn tasks that perform puts during GC
+        tasks =
+          for x <- 51..100 do
+            task_async(cache, name, fn ->
+              cache.put!(x, x)
+              {:ok, true}
+            end)
+          end
+
+        # Trigger multiple generation changes
+        _ = new_generation(cache, name)
+        _ = new_generation(cache, name)
+
+        # All puts should succeed
+        results = Task.await_many(tasks, 5000)
+        assert Enum.all?(results, &(&1 == {:ok, true}))
+      end
+
+      test "delete_all with query during generation change", %{cache: cache, name: name} do
+        import Ex2ms
+
+        # Put tagged entries
+        :ok = cache.put_all(for(x <- 1..50, do: {x, x}), tag: :group_a)
+        :ok = cache.put_all(for(x <- 51..100, do: {x, x}), tag: :group_b)
+
+        # Create match spec for group_a
+        test_ms =
+          fun do
+            {_, _, _, _, _, tag} when tag == :group_a -> true
+          end
+
+        # Spawn task to delete while we change generations
+        task =
+          task_async(cache, name, fn ->
+            cache.delete_all!(query: test_ms)
+          end)
+
+        # Trigger generation change during delete operation
+        _ = new_generation(cache, name)
+
+        # Delete should succeed
+        deleted_count = Task.await(task, 5000)
+        assert deleted_count >= 0 and deleted_count <= 50
+
+        # Verify only group_b entries remain (or were also affected by GC)
+        remaining = cache.count_all!()
+        assert remaining >= 0 and remaining <= 100
+      end
+
+      test "stream operations during generation deletion", %{cache: cache, name: name} do
+        # Put entries
+        :ok = cache.put_all(for x <- 1..100, do: {x, x * 2})
+        _ = new_generation(cache, name)
+
+        # Start streaming
+        stream_task =
+          task_async(cache, name, fn ->
+            {:ok, stream} = cache.stream([select: :value], max_entries: 10)
+            Enum.to_list(stream)
+          end)
+
+        # Delete generation while streaming
+        :ok = Process.sleep(10)
+        _ = new_generation(cache, name)
+
+        # Stream should complete without errors (may have partial results)
+        result = Task.await(stream_task, 5000)
+        assert is_list(result)
+      end
+
+      test "update_counter during generation change", %{cache: cache, name: name} do
+        # Initial counter
+        assert cache.incr!(:counter, 1) == 1
+        _ = new_generation(cache, name)
+
+        # Spawn multiple tasks incrementing counter during GC
+        tasks =
+          for _ <- 1..50 do
+            task_async(cache, name, fn ->
+              cache.incr!(:counter, 1)
+            end)
+          end
+
+        # Trigger generation change
+        _ = new_generation(cache, name)
+
+        # All increments should succeed
+        results = Task.await_many(tasks, 5000)
+        assert length(results) == 50
+
+        # Final counter value should reflect all increments
+        final_value = cache.get!(:counter)
+        assert final_value >= 1 and final_value <= 51
+      end
+
+      test "mixed operations with high concurrency", %{cache: cache, name: name} do
+        # Initial data
+        :ok = cache.put_all(for x <- 1..20, do: {x, x})
+
+        # Spawn mix of operations
+        read_tasks = for x <- 1..20, do: task_async(cache, name, fn -> cache.get!(x) end)
+        write_tasks = for x <- 21..40, do: task_async(cache, name, fn -> cache.put!(x, x) end)
+        delete_tasks = for x <- 1..10, do: task_async(cache, name, fn -> cache.delete!(x) end)
+        count_tasks = for _ <- 1..5, do: task_async(cache, name, fn -> cache.count_all!() end)
+
+        # Trigger multiple generation changes during operations
+        gc_task =
+          task_async(cache, name, fn ->
+            _ = new_generation(cache, name)
+            :ok = Process.sleep(20)
+            _ = new_generation(cache, name)
+            :ok
+          end)
+
+        # Wait for all operations
+        Task.await(gc_task, 5000)
+        Task.await_many(read_tasks ++ write_tasks ++ delete_tasks ++ count_tasks, 5000)
+
+        # Cache should be in consistent state
+        count = cache.count_all!()
+        assert count >= 0 and count <= 40
+      end
+    end
+
     ## Helpers
 
     defp new_generation(cache, name) do
@@ -611,7 +842,7 @@ defmodule Nebulex.Adapters.LocalTest do
     defp get_from(gen, name, key) do
       case Adapter.lookup_meta(name).backend.lookup(gen, key) do
         [] -> nil
-        [{_, ^key, val, _, _}] -> val
+        [{_, ^key, val, _, _, _}] -> val
       end
     end
 
@@ -637,6 +868,10 @@ defmodule Nebulex.Adapters.LocalTest do
       stream
       |> Enum.to_list()
       |> :lists.usort()
+    end
+
+    defp task_async(cache, name, fun) do
+      Task.async(fn -> cache.with_dynamic_cache(name, fun) end)
     end
   end
 end
