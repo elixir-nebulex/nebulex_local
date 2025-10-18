@@ -84,6 +84,10 @@ if Code.ensure_loaded?(Ex2ms) do
     it.
     """
 
+    import Ex2ms
+
+    ## API
+
     @doc """
     Imports the query helper macros and `Ex2ms` for building match specifications.
 
@@ -244,6 +248,78 @@ if Code.ensure_loaded?(Ex2ms) do
 
       # Return as a tuple AST node
       {:{}, [], elements}
+    end
+
+    @doc """
+    Builds a match spec for finding cache reference entries (keyrefs).
+
+    This is useful for invalidating all reference keys that point to a specific
+    referenced key. Cache references are created using the `keyref/2` function
+    in Nebulex caching decorators.
+
+    The match spec returns the reference key (the cache key that points to the
+    referenced key). This works seamlessly with `get_all/1`, `delete_all/1`, and
+    `count_all/1` operations.
+
+    ## Parameters
+
+      * `referenced_key` - The key that references point to (required).
+      * `opts` - Optional keyword list:
+        * `:cache` - Filter references to a specific cache (optional). When not
+          provided, matches references in any cache (including `nil` for local
+          references).
+
+    ## Examples
+
+        # Delete all reference entries pointing to a specific key (any cache)
+        ms = keyref_match_spec(:user_123)
+        MyCache.delete_all!(query: ms)
+
+        # Delete reference entries pointing to a key in a specific cache
+        ms = keyref_match_spec(:user_123, cache: MyApp.UserCache)
+        MyCache.delete_all!(query: ms)
+
+        # Count how many references point to a key
+        ms = keyref_match_spec(:product_456)
+        MyCache.count_all!(query: ms)
+
+        # Get all cache keys that are references to a specific key
+        ms = keyref_match_spec(:user_123)
+        reference_keys = MyCache.get_all!(query: ms)
+
+    ## Background
+
+    When using the `:references` option with caching decorators, Nebulex stores
+    reference entries as keyref records with the structure:
+    `{:"$nbx_keyref_spec", cache, key, ttl}`. This function helps you query and
+    clean up these reference entries.
+
+    ## See also
+
+      * `Nebulex.Caching` - For information about cache references and the
+        `:references` option.
+
+    """
+    @spec keyref_match_spec(term(), keyword()) :: :ets.match_spec()
+    def keyref_match_spec(referenced_key, opts \\ []) do
+      {cache_filter, _opts} = Keyword.pop(opts, :cache)
+
+      # Always return the reference key (the cache key that points to the referenced key)
+      # This works for get_all (returns the keys), and the adapter overrides it for
+      # delete_all/count_all to return true as needed
+      if cache_filter do
+        fun do
+          {:entry, k, {:"$nbx_keyref_spec", c, ref_k, _t}, _, _, _}
+          when ref_k == ^referenced_key and c == ^cache_filter ->
+            k
+        end
+      else
+        fun do
+          {:entry, k, {:"$nbx_keyref_spec", _c, ref_k, _t}, _, _, _}
+          when ref_k == ^referenced_key ->
+            k
+        end
+      end
     end
   end
 end

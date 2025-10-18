@@ -480,6 +480,19 @@ defmodule Nebulex.Adapters.LocalTest do
         ms = match_spec value: v, tag: t, where: is_binary(v) and t == :strings
         assert cache.count_all!(query: ms) == 2
       end
+
+      test "QueryHelper: query a map as a value", %{cache: cache} do
+        assert cache.put_all([a: %{x: 1}, b: %{x: 2}], tag: :maps) == :ok
+
+        var = 1
+        ms = match_spec value: %{x: x}, tag: t, where: x == ^var and t == :maps, select: x
+
+        assert cache.get_all!(query: ms) == [1]
+
+        ms = match_spec value: %{x: x}, tag: t, where: t == :maps, select: x
+
+        assert cache.get_all!(query: ms) |> Enum.sort() == [1, 2]
+      end
     end
 
     describe "older generation hitted on" do
