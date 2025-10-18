@@ -275,6 +275,146 @@ defmodule Nebulex.Adapters.Local do
 
   > You can use the `Ex2ms` or `MatchSpec` library to build queries easier.
 
+  ## Building Match Specs with QueryHelper
+
+  The `Nebulex.Adapters.Local.QueryHelper` module provides a user-friendly,
+  SQL-like syntax for building ETS match specifications without needing to know
+  the internal entry tuple structure. This is especially useful when working
+  with the local adapter's queryable API.
+
+  ### Why use QueryHelper?
+
+  When building match specs manually, you need to know that entries are stored
+  as `{:entry, key, value, touched, exp, tag}` tuples. QueryHelper abstracts
+  this away, letting you work with named field bindings instead:
+
+      # Without QueryHelper - you need to know the exact tuple structure
+      import Ex2ms
+      match_spec = fun do
+        {:entry, k, v, _, _, _} when k == :foo -> v
+      end
+
+      # With QueryHelper - clean, declarative syntax
+      use Nebulex.Adapters.Local.QueryHelper
+      match_spec = match_spec key: k, value: v, where: k == :foo, select: v
+
+  ### Getting started
+
+  Use `Nebulex.Adapters.Local.QueryHelper` in your module to enable the
+  `match_spec/1` macro and `Ex2ms` support:
+
+      defmodule MyCache.Queries do
+        use Nebulex.Adapters.Local.QueryHelper
+
+        def by_key(key) do
+          match_spec key: k, value: v, where: k == key, select: v
+        end
+
+        def by_tag(tag) do
+          match_spec tag: t, where: t == tag, select: true
+        end
+
+        def expensive_keys do
+          match_spec key: k, value: v, where: is_integer(v) and v > 100, select: k
+        end
+      end
+
+  ### Syntax
+
+  The `match_spec/1` macro accepts a keyword list with:
+
+    * **Field bindings** - `:key`, `:value`, `:touched`, `:exp`, `:tag` - Bind
+      entry fields to variables. Fields not mentioned are automatically
+      wildcarded.
+    * **`:where`** - Optional guard clause with conditions (supports all ETS
+      guard functions).
+    * **`:select`** - Required return expression specifying what to return.
+
+  ### Examples
+
+      # Match all entries where value is greater than 10
+      match_spec value: v, where: v > 10, select: v
+
+      # Match entries with a specific tag
+      match_spec key: k, tag: t, where: t == :important, select: k
+
+      # Complex guards with multiple conditions
+      match_spec key: k, value: v, exp: e,
+                 where: is_integer(v) and e != :infinity,
+                 select: {k, v, e}
+
+      # Match without guards (all entries)
+      match_spec key: k, value: v, select: {k, v}
+
+      # Return entire entry
+      match_spec key: k, tag: t, where: t == :session, select: :"$_"
+
+      # Query only specific fields
+      match_spec tag: t, where: t == :cache_group, select: true
+
+  ### Using with cache operations
+
+  QueryHelper match specs work seamlessly with all queryable operations:
+
+      use Nebulex.Adapters.Local.QueryHelper
+
+      # Get all values where key is an integer greater than 10
+      ms = match_spec key: k, value: v, where: is_integer(k) and k > 10, select: v
+      MyCache.get_all!(query: ms)
+
+      # Count entries with a specific tag
+      ms = match_spec tag: t, where: t == :user_session, select: true
+      MyCache.count_all!(query: ms)
+
+      # Delete expired entries (exp is not :infinity and less than now)
+      now = System.system_time(:millisecond)
+      ms = match_spec exp: e, where: e != :infinity and e < now, select: true
+      MyCache.delete_all!(query: ms)
+
+      # Stream entries in batches
+      ms = match_spec value: v, where: is_binary(v), select: v
+      MyCache.stream!(query: ms) |> Enum.take(100)
+
+  ### Practical examples
+
+  Here are some common patterns using QueryHelper:
+
+      defmodule MyApp.CacheQueries do
+        use Nebulex.Adapters.Local.QueryHelper
+
+        # Find all entries for a specific user
+        def user_entries(user_id) do
+          match_spec tag: t, where: t == {:user, user_id}, select: :"$_"
+        end
+
+        # Find entries expiring soon (within next hour)
+        def expiring_soon do
+          cutoff = System.system_time(:millisecond) + :timer.hours(1)
+          match_spec exp: e, where: e != :infinity and e < cutoff, select: true
+        end
+
+        # Get all cached integers
+        def integer_values do
+          match_spec value: v, where: is_integer(v), select: v
+        end
+
+        # Complex filtering with multiple conditions
+        def recent_tagged_entries(tag, min_time) do
+          match_spec key: k,
+                     value: v,
+                     tag: t,
+                     touched: ts,
+                     where: t == tag and ts > min_time,
+                     select: {k, v}
+        end
+      end
+
+      # Use in your application
+      MyApp.Cache.get_all!(query: MyApp.CacheQueries.user_entries(123))
+      MyApp.Cache.delete_all!(query: MyApp.CacheQueries.expiring_soon())
+
+  See `Nebulex.Adapters.Local.QueryHelper` for complete documentation.
+
   ## Tagging entries
 
   The local adapter supports tagging cache entries with arbitrary terms via the
@@ -309,11 +449,37 @@ defmodule Nebulex.Adapters.Local do
 
   ### Querying by tag
 
-  To query entries by tag, use ETS match specifications with the entry pattern
-  `{:entry, key, value, touched, ttl, tag}` where the tag is in the 6th
-  position:
+  You can query entries by tag using either **QueryHelper** (recommended for
+  cleaner syntax) or **Ex2ms**:
 
-      # Using Ex2ms for easier query building
+      # Using QueryHelper (recommended)
+      use Nebulex.Adapters.Local.QueryHelper
+
+      # Get all values for entries with a specific tag
+      match_spec = match_spec value: v, tag: t, where: t == :group_a, select: v
+      MyCache.get_all!(query: match_spec)
+      #=> [1, 2, 3]
+
+      # Delete all entries with a specific tag
+      match_spec = match_spec tag: t, where: t == :group_a, select: true
+      MyCache.delete_all!(query: match_spec)
+
+      # Query entries with multiple tags (return key-value tuples)
+      match_spec = match_spec key: k, value: v, tag: t,
+                             where: t == :group_a or t == :group_b,
+                             select: {k, v}
+      MyCache.get_all!(query: match_spec)
+      #=> [{:a, 1}, {:b, 2}, {:c, 3}, {:d, 4}, {:e, 5}, {:f, 6}]
+
+      # Count entries with a specific tag
+      match_spec = match_spec tag: t, where: t == :group_a, select: true
+      MyCache.count_all!(query: match_spec)
+      #=> 3
+
+  Alternatively, you can use **Ex2ms** if you need to work with the raw tuple
+  structure:
+
+      # Using Ex2ms (alternative approach)
       import Ex2ms
 
       # Get all values for entries with a specific tag
@@ -321,11 +487,8 @@ defmodule Nebulex.Adapters.Local do
         {_, _, value, _, _, tag} when tag == :group_a -> value
       end
 
-      MyCache.get_all!(query: match_spec, select: :value)
+      MyCache.get_all!(query: match_spec)
       #=> [1, 2, 3]
-
-      # Delete all entries with a specific tag
-      MyCache.delete_all!(query: match_spec)
 
       # Query entries with multiple tags
       match_spec = fun do
@@ -333,7 +496,7 @@ defmodule Nebulex.Adapters.Local do
           {key, value}
       end
 
-      MyCache.get_all!(query: match_spec, select: {:key, :value})
+      MyCache.get_all!(query: match_spec)
       #=> [{:a, 1}, {:b, 2}, {:c, 3}, {:d, 4}, {:e, 5}, {:f, 6}]
 
   ### Practical example
@@ -350,7 +513,13 @@ defmodule Nebulex.Adapters.Local do
         {"user:\#{user_id}:permissions", permissions}
       ], tag: {:user, user_id})
 
-      # Later, invalidate all data for this user
+      # Later, invalidate all data for this user using QueryHelper
+      use Nebulex.Adapters.Local.QueryHelper
+
+      invalidate_user = match_spec tag: t, where: t == {:user, 123}, select: true
+      MyCache.delete_all!(query: invalidate_user)
+
+      # Or using Ex2ms (alternative)
       import Ex2ms
 
       invalidate_user = fun do

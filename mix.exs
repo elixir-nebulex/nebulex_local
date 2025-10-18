@@ -47,6 +47,7 @@ defmodule NebulexAdaptersLocal.MixProject do
       {:nimble_options, "~> 0.5 or ~> 1.0"},
       {:telemetry, "~> 0.4 or ~> 1.0", optional: true},
       {:shards, "~> 1.1", optional: true},
+      {:ex2ms, "~> 1.7", optional: true},
 
       # Test & Code Analysis
       {:excoveralls, "~> 0.18", only: :test},
@@ -55,7 +56,6 @@ defmodule NebulexAdaptersLocal.MixProject do
       {:sobelow, "~> 0.14", only: [:dev, :test], runtime: false},
       {:stream_data, "~> 1.2", only: [:dev, :test]},
       {:mimic, "~> 2.1", only: :test},
-      {:ex2ms, "~> 1.7", only: :test},
 
       # Benchmark Test
       {:benchee, "~> 1.4", only: [:dev, :test]},

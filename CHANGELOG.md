@@ -5,6 +5,21 @@
 
 ### Enhancements
 
+- [Nebulex.Adapters.Local] Improved generation garbage collection performance by
+  deleting ETS tables directly instead of flushing all objects first. This
+  change significantly improves GC performance for large caches, reducing
+  generation deletion from O(n) to O(1) complexity. The deprecated generation
+  is now deleted after a grace period defined by the new `:gc_cleanup_delay`
+  option (formerly `:gc_flush_delay`), which allows ongoing operations to
+  complete safely before table removal.
+  [#2](https://github.com/elixir-nebulex/nebulex_local/issues/2).
+- [Nebulex.Adapters.Local] Added automatic retry logic to handle race conditions
+  when accessing deleted generations during garbage collection. Operations now
+  retry up to 3 times when encountering `ArgumentError` due to deleted ETS
+  tables, automatically fetching fresh generation references. This prevents
+  crashes and improves resilience during GC cycles, especially under high
+  concurrency.
+  [#3](https://github.com/elixir-nebulex/nebulex_local/issues/3).
 - [Nebulex.Adapters.Local] Added support for entry tagging via the `:tag` option.
   Cache entries can now be tagged with arbitrary terms (atoms, tuples, strings,
   etc.) to enable logical grouping, selective invalidation, and efficient
@@ -14,21 +29,16 @@
   specified when using `put/3`, `put_all/2`, and related operations, and entries
   can be queried by tag using match specs.
   [#4](https://github.com/elixir-nebulex/nebulex_local/issues/4).
-- [Nebulex.Adapters.Local] Added automatic retry logic to handle race conditions
-  when accessing deleted generations during garbage collection. Operations now
-  retry up to 3 times when encountering `ArgumentError` due to deleted ETS
-  tables, automatically fetching fresh generation references. This prevents
-  crashes and improves resilience during GC cycles, especially under high
-  concurrency.
-  [#3](https://github.com/elixir-nebulex/nebulex_local/issues/3).
-- [Nebulex.Adapters.Local] Improved generation garbage collection performance by
-  deleting ETS tables directly instead of flushing all objects first. This
-  change significantly improves GC performance for large caches, reducing
-  generation deletion from O(n) to O(1) complexity. The deprecated generation
-  is now deleted after a grace period defined by the new `:gc_cleanup_delay`
-  option (formerly `:gc_flush_delay`), which allows ongoing operations to
-  complete safely before table removal.
-  [#2](https://github.com/elixir-nebulex/nebulex_local/issues/2).
+- [Nebulex.Adapters.Local] Added `Nebulex.Adapters.Local.QueryHelper` module
+  providing a user-friendly, SQL-like syntax for building ETS match
+  specifications. Instead of requiring users to know the internal entry tuple
+  structure `{:entry, key, value, touched, exp, tag}`, QueryHelper offers named
+  field bindings (`:key`, `:value`, `:tag`, `:touched`, `:exp`) with a
+  declarative syntax. The `:select` clause is optional and defaults to `true`,
+  making count and delete operations more concise. This dramatically improves
+  the developer experience when working with the queryable API, especially for
+  tag-based queries. Example: `match_spec value: v, tag: t, where: t == :group_a, select: v`.
+  [#5](https://github.com/elixir-nebulex/nebulex_local/issues/5).
 
 ### Backwards incompatible changes
 

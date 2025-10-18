@@ -4,10 +4,11 @@ defmodule Nebulex.Adapters.LocalTest do
   import Nebulex.CacheCase
 
   deftests do
-    import Ex2ms
+    alias Nebulex.Adapter
+
     import Nebulex.CacheCase, only: [cache_put: 2, cache_put: 3, cache_put: 4, t_sleep: 1]
 
-    alias Nebulex.Adapter
+    use Nebulex.Adapters.Local.QueryHelper
 
     describe "error" do
       test "on init because invalid backend", %{cache: cache} do
@@ -389,6 +390,95 @@ defmodule Nebulex.Adapters.LocalTest do
 
       test "stream returns empty when is evaluated", %{cache: cache} do
         assert cache.stream!(in: []) |> Enum.to_list() == []
+      end
+
+      test "QueryHelper: get_all with tag", %{cache: cache} do
+        assert cache.put_all([a: 1, b: 2, c: 3], tag: :foo) == :ok
+        assert cache.put_all([d: 4, e: 5, f: 6], tag: :bar) == :ok
+
+        # Get values for a specific tag
+        ms = match_spec value: v, tag: t, where: t == :foo, select: v
+        assert cache.get_all!(query: ms) |> Enum.sort() == [1, 2, 3]
+
+        # Get key-value pairs for multiple tags
+        ms = match_spec key: k, value: v, tag: t, where: t == :foo or t == :bar, select: {k, v}
+        result = cache.get_all!(query: ms) |> Enum.sort()
+        assert result == Enum.sort(a: 1, b: 2, c: 3, d: 4, e: 5, f: 6)
+      end
+
+      test "QueryHelper: count_all with tag", %{cache: cache} do
+        assert cache.put_all([a: 1, b: 2, c: 3], tag: :foo) == :ok
+        assert cache.put_all([d: 4, e: 5, f: 6], tag: :bar) == :ok
+
+        # Count entries with specific tag (using default select: true)
+        ms = match_spec tag: t, where: t == :foo
+        assert cache.count_all!(query: ms) == 3
+
+        # Count entries with multiple tags (using default select: true)
+        ms = match_spec tag: t, where: t == :foo or t == :bar
+        assert cache.count_all!(query: ms) == 6
+      end
+
+      test "QueryHelper: delete_all with tag", %{cache: cache} do
+        assert cache.put_all([a: 1, b: 2, c: 3], tag: :foo) == :ok
+        assert cache.put_all([d: 4, e: 5, f: 6], tag: :bar) == :ok
+
+        # Delete entries with specific tag (using default select: true)
+        ms = match_spec tag: t, where: t == :foo
+        assert cache.delete_all!(query: ms) == 3
+
+        # Verify deletion (using default select: true)
+        ms = match_spec tag: t, where: t == :foo
+        assert cache.count_all!(query: ms) == 0
+
+        # Only :bar entries should remain (using default select: true)
+        ms = match_spec tag: t, where: t == :bar
+        assert cache.count_all!(query: ms) == 3
+      end
+
+      test "QueryHelper: delete_all overrides select clause", %{cache: cache} do
+        assert cache.put_all([a: 1, b: 2, c: 3], tag: :test) == :ok
+
+        # Even though we select {k, v}, delete_all should work because
+        # the adapter overrides the return value to true
+        ms = match_spec key: k, value: v, tag: t, where: t == :test, select: {k, v}
+        assert cache.delete_all!(query: ms) == 3
+
+        # Verify all entries were deleted
+        assert cache.count_all!() == 0
+      end
+
+      test "QueryHelper: stream with tag", %{cache: cache} do
+        assert cache.put_all([a: 1, b: 2, c: 3], tag: :foo) == :ok
+        assert cache.put_all([d: 4, e: 5, f: 6], tag: :bar) == :ok
+
+        # Stream values for a specific tag
+        ms = match_spec value: v, tag: t, where: t == :foo, select: v
+        {:ok, stream} = cache.stream([query: ms], max_entries: 2)
+        result = Enum.to_list(stream) |> Enum.sort()
+        assert result == [1, 2, 3]
+      end
+
+      test "QueryHelper: complex queries with multiple fields", %{cache: cache} do
+        # Put entries with different value types
+        assert cache.put_all([a: 10, b: 20, c: 30], tag: :numbers) == :ok
+        assert cache.put_all([d: "foo", e: "bar"], tag: :strings) == :ok
+        assert cache.put_all([f: 5, g: 15], tag: :numbers) == :ok
+
+        # Get all integer values greater than 10 with :numbers tag
+        ms =
+          match_spec key: k,
+                     value: v,
+                     tag: t,
+                     where: is_integer(v) and v > 10 and t == :numbers,
+                     select: {k, v}
+
+        result = cache.get_all!(query: ms) |> Enum.sort()
+        assert result == Enum.sort(b: 20, c: 30, g: 15)
+
+        # Count string values (using default select: true)
+        ms = match_spec value: v, tag: t, where: is_binary(v) and t == :strings
+        assert cache.count_all!(query: ms) == 2
       end
     end
 
