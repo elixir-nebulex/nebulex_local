@@ -413,6 +413,79 @@ defmodule Nebulex.Adapters.Local do
       MyApp.Cache.get_all!(query: MyApp.CacheQueries.user_entries(123))
       MyApp.Cache.delete_all!(query: MyApp.CacheQueries.expiring_soon())
 
+  ### Working with cache references
+
+  When using the `:references` option with `Nebulex.Caching` decorators (like
+  `@decorate cacheable/3`), Nebulex creates reference entries to track
+  dependencies between cached values. The `keyref_match_spec/2` helper makes it
+  easy to find and clean up these reference entries.
+
+  The function builds a match spec that finds all cache keys (reference keys)
+  that point to a specific referenced key. This is useful for:
+
+    * Invalidating all entries that depend on a specific key
+    * Counting how many references point to a key
+    * Getting a list of dependent cache keys
+
+  #### Examples
+
+      import Nebulex.Adapters.Local.QueryHelper
+
+      # Delete all references to a specific key (any cache)
+      ms = keyref_match_spec(:user_123)
+      MyCache.delete_all!(query: ms)
+
+      # Delete references in a specific cache only
+      ms = keyref_match_spec(:user_123, cache: MyApp.UserCache)
+      MyCache.delete_all!(query: ms)
+
+      # Count how many cache entries reference a key
+      ms = keyref_match_spec(:product_456)
+      count = MyCache.count_all!(query: ms)
+
+      # Get all cache keys that reference a specific key
+      ms = keyref_match_spec(:user_123)
+      reference_keys = MyCache.get_all!(query: ms)
+
+  #### Example: Invalidating cached method results
+
+  When using the `:references` option with caching decorators, you can easily
+  invalidate all cached results that depend on a specific entity:
+
+      defmodule MyApp.UserAccounts do
+          use Nebulex.Caching, cache: MyApp.Cache
+          use Nebulex.Adapters.Local.QueryHelper
+
+          @decorate cacheable(key: id)
+          def get_user_account(id) do
+            # your logic ...
+          end
+
+          @decorate cacheable(key: email, references: &(&1 && &1.id))
+          def get_user_account_by_email(email) do
+            # your logic ...
+          end
+
+          @decorate cacheable(key: token, references: &(&1 && &1.id))
+          def get_user_account_by_token(token) do
+            # your logic ...
+          end
+
+          @decorate cache_evict(key: user.id, query: &__MODULE__.keyref_query/1)
+          def update_user_account(user, attrs) do
+            # your logic ...
+          end
+
+          def keyref_query(%{args: [user | _]} = _context) do
+            keyref_match_spec(user.id)
+          end
+        end
+      end
+
+  See `Nebulex.Adapters.Local.QueryHelper.keyref_match_spec/2` for more details.
+
+  ---
+
   See `Nebulex.Adapters.Local.QueryHelper` for complete documentation.
 
   ## Tagging entries

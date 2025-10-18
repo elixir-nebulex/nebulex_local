@@ -295,4 +295,93 @@ defmodule Nebulex.Adapters.Local.QueryHelperTest do
       assert Enum.sort(result) == [{4, 100}, {5, 200}]
     end
   end
+
+  describe "keyref_match_spec/2" do
+    test "returns a valid match spec" do
+      ms = keyref_match_spec(:user_123)
+
+      # Should return a valid ETS match spec (list of tuples)
+      assert is_list(ms)
+      assert length(ms) == 1
+      assert {_pattern, _guards, _select} = hd(ms)
+    end
+
+    test "returns a valid match spec with cache filter" do
+      ms = keyref_match_spec(:user_123, cache: MyApp.Cache)
+
+      assert is_list(ms)
+      assert length(ms) == 1
+    end
+  end
+
+  describe "keyref_match_spec/2 integration with ETS" do
+    setup do
+      table_name = :"test_keyref_table_#{:erlang.unique_integer([:positive])}"
+      table = :ets.new(table_name, [:set, :public, :named_table, keypos: 2])
+
+      # Insert some regular entries
+      true = :ets.insert(table, {:entry, :key1, "value1", 1000, 2000, nil})
+      true = :ets.insert(table, {:entry, :key2, "value2", 1100, 2100, nil})
+
+      # Insert keyref entries (cache references)
+      # Reference to :user_123 in nil cache (local reference)
+      true =
+        :ets.insert(
+          table,
+          {:entry, :ref1, {:"$nbx_keyref_spec", nil, :user_123, nil}, 1200, :infinity, nil}
+        )
+
+      # Reference to :user_123 in MyApp.Cache
+      true =
+        :ets.insert(
+          table,
+          {:entry, :ref2, {:"$nbx_keyref_spec", MyApp.Cache, :user_123, nil}, 1300, :infinity, nil}
+        )
+
+      # Reference to :user_456 in MyApp.Cache
+      true =
+        :ets.insert(
+          table,
+          {:entry, :ref3, {:"$nbx_keyref_spec", MyApp.Cache, :user_456, nil}, 1400, :infinity, nil}
+        )
+
+      # Reference to :user_123 in AnotherCache
+      true =
+        :ets.insert(
+          table,
+          {:entry, :ref4, {:"$nbx_keyref_spec", AnotherCache, :user_123, nil}, 1500, :infinity, nil}
+        )
+
+      on_exit(fn ->
+        if :ets.whereis(table_name) != :undefined do
+          :ets.delete(table)
+        end
+      end)
+
+      %{table: table}
+    end
+
+    test "gets all reference keys pointing to a specific key (any cache)", %{table: table} do
+      ms = keyref_match_spec(:user_123)
+      result = :ets.select(table, ms) |> Enum.sort()
+
+      # Should return the keys of all reference entries
+      assert result == [:ref1, :ref2, :ref4]
+    end
+
+    test "gets reference keys for a specific cache", %{table: table} do
+      ms = keyref_match_spec(:user_123, cache: MyApp.Cache)
+      result = :ets.select(table, ms)
+
+      # Should return only :ref2 (reference to :user_123 in MyApp.Cache)
+      assert result == [:ref2]
+    end
+
+    test "returns empty when no references exist", %{table: table} do
+      ms = keyref_match_spec(:nonexistent_key)
+      result = :ets.select(table, ms)
+
+      assert result == []
+    end
+  end
 end

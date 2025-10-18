@@ -39,6 +39,17 @@
   the developer experience when working with the queryable API, especially for
   tag-based queries. Example: `match_spec value: v, tag: t, where: t == :group_a, select: v`.
   [#5](https://github.com/elixir-nebulex/nebulex_local/issues/5).
+- [Nebulex.Adapters.Local] Added `keyref_match_spec/2` helper function to
+  `Nebulex.Adapters.Local.QueryHelper` for managing cache reference entries
+  (keyrefs). This helper simplifies finding and cleaning up reference entries
+  created when using the `:references` option with `Nebulex.Caching` decorators.
+  Users can now easily invalidate all cached representations of an entity with a
+  simple function call, without needing to know the internal keyref structure
+  `{:"$nbx_keyref_spec", cache, key, ttl}`. Example:
+  `keyref_match_spec(:user_123) |> MyCache.delete_all!(query: ...)`. This works
+  seamlessly with `get_all/1`, `count_all/1`, and `delete_all/1` operations, and
+  supports optional cache filtering.
+  [#6](https://github.com/elixir-nebulex/nebulex_local/issues/6).
 
 ### Backwards incompatible changes
 
