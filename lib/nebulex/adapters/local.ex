@@ -23,7 +23,8 @@ defmodule Nebulex.Adapters.Local do
     * Expiration - A status based on TTL (Time To Live) option. To maintain
       cache performance, expired entries may not be immediately removed or
       evicted, they are expired or evicted on-demand, when the key is read.
-    * Eviction - [Generational Garbage Collection][gc].
+    * Eviction - Generational Garbage Collection
+      (see `Nebulex.Adapters.Local.Generation`).
     * Sharding - For intensive workloads, the Cache may also be partitioned
       (by using `:shards` backend and specifying the `:partitions` option).
     * Support for transactions via Erlang global name registration facility.
@@ -31,8 +32,6 @@ defmodule Nebulex.Adapters.Local do
     * Support for stats.
     * Automatic retry logic for handling race conditions during garbage
       collection (see [Concurrency and resilience](#module-concurrency-and-resilience)).
-
-  [gc]: http://hexdocs.pm/nebulex/3.0.0-rc.1/Nebulex.Adapters.Local.Generation.html
 
   ## Concurrency and resilience
 
@@ -482,11 +481,7 @@ defmodule Nebulex.Adapters.Local do
         end
       end
 
-  See `Nebulex.Adapters.Local.QueryHelper.keyref_match_spec/2` for more details.
-
-  ---
-
-  See `Nebulex.Adapters.Local.QueryHelper` for complete documentation.
+  > See `Nebulex.Adapters.Local.QueryHelper` for complete documentation.
 
   ## Tagging entries
 
@@ -509,10 +504,13 @@ defmodule Nebulex.Adapters.Local do
       MyCache.put("user:123:profile", user_data, tag: :user_123)
 
       # Tag multiple entries at once
-      MyCache.put_all([
-        {"session:abc:data", session_data},
-        {"session:abc:prefs", preferences}
-      ], tag: :session_abc)
+      MyCache.put_all(
+        [
+          {"session:abc:data", session_data},
+          {"session:abc:prefs", preferences},
+        ],
+        tag: :session_abc
+      )
 
       # Different tags for different entry groups
       MyCache.put_all([a: 1, b: 2, c: 3], tag: :group_a)
@@ -603,6 +601,147 @@ defmodule Nebulex.Adapters.Local do
 
   Tags can be any Elixir term (atoms, tuples, strings, etc.), giving you
   flexibility in how you organize your cache entries.
+
+  ## Using Caching Decorators with QueryHelper
+
+  The `Nebulex.Caching` decorators (`@decorate`) integrate seamlessly with
+  QueryHelper and tagging for powerful cache management patterns. This section
+  shows practical examples of combining decorators with QueryHelper and tags.
+
+  ### Entry Tagging with Decorators
+
+  You can tag entries automatically when using `@decorate cacheable` and
+  `@decorate cache_put` by specifying the `:tag` option:
+
+      defmodule MyApp.UserCache do
+        use Nebulex.Caching, cache: MyApp.Cache
+        use Nebulex.Adapters.Local.QueryHelper
+
+        # Cache user data with automatic tagging
+        @decorate cacheable(key: user_id, opts: [tag: :users])
+        def get_user(user_id) do
+          # fetch user from database
+          {:ok, user}
+        end
+
+        # Cache user permissions with automatic tagging
+        @decorate cacheable(key: user_id, opts: [tag: :permissions])
+        def get_user_permissions(user_id) do
+          # fetch permissions from database
+          {:ok, permissions}
+        end
+
+        # Store session data with automatic tagging
+        @decorate cache_put(key: session_id, opts: [tag: :sessions])
+        def create_session(session_id, data) do
+          data
+        end
+      end
+
+  ### Selective Cache Invalidation with Tags
+
+  Use the `@decorate cache_evict` decorator with QueryHelper to invalidate
+  entries by tag. This is useful for clearing related cached data:
+
+      defmodule MyApp.UserCache do
+        use Nebulex.Caching, cache: MyApp.Cache
+        use Nebulex.Adapters.Local.QueryHelper
+
+        # ... cacheable functions as above ...
+
+        # Evict all cached data for a specific user
+        @decorate cache_evict(query: &evict_user_query/1)
+        def invalidate_user(user_id) do
+          :ok
+        end
+
+        defp evict_user_query(context) do
+          # Return a QueryHelper match spec to evict entries by tag
+          match_spec tag: t, where: t == :users, select: true
+        end
+      end
+
+  ### Cache Reference Invalidation with keyref_match_spec
+
+  When using the `:references` option to track cache dependencies, you can
+  use `keyref_match_spec` with `cache_evict` to invalidate all dependent
+  entries:
+
+      defmodule MyApp.UserAccounts do
+        use Nebulex.Caching, cache: MyApp.Cache
+        use Nebulex.Adapters.Local.QueryHelper
+
+        # Cache user account by ID
+        @decorate cacheable(key: user_id)
+        def get_user_account(user_id) do
+          fetch_user(user_id)
+        end
+
+        # Cache user account by email, referencing the user ID
+        @decorate cacheable(key: email, references: &(&1 && &1.id))
+        def get_user_account_by_email(email) do
+          user = fetch_user_by_email(email)
+          {:ok, user}
+        end
+
+        # Cache user account by token, also referencing the user ID
+        @decorate cacheable(key: token, references: &(&1 && &1.id))
+        def get_user_account_by_token(token) do
+          user = fetch_user_by_token(token)
+          {:ok, user}
+        end
+
+        # Evict all cache entries referencing a specific user
+        # This invalidates all lookups (by id, email, token) in one operation
+        @decorate cache_evict(key: user_id, query: &invalidate_refs/1)
+        def update_user_account(user_id, attrs) do
+          :ok
+        end
+
+        defp invalidate_refs(%{args: [user_id | _]} = _context) do
+          keyref_match_spec(user_id)
+        end
+      end
+
+  ### Practical Pattern: Clearing All Session Data
+
+  Here's a complete example showing how to manage user sessions with automatic
+  tagging and selective eviction:
+
+      defmodule MyApp.Sessions do
+        use Nebulex.Caching, cache: MyApp.Cache
+        use Nebulex.Adapters.Local.QueryHelper
+
+        # Store session data with automatic tagging by user ID
+        @decorate cache_put(key: session_id, opts: [tag: {:session, user_id}])
+        def store_session(user_id, session_id, data) do
+          data
+        end
+
+        # Evict all sessions for a specific user when they log out
+        @decorate cache_evict(query: &evict_user_sessions_query/1)
+        def logout_user(user_id) do
+          :ok
+        end
+
+        defp evict_user_sessions_query(%{args: [user_id]} = _context) do
+          match_spec tag: t, where: t == {:session, user_id}
+        end
+
+        # Clear all sessions across all users (e.g., during maintenance)
+        @decorate cache_evict(query: &evict_all_sessions_query/1)
+        def clear_all_sessions do
+          :ok
+        end
+
+        defp evict_all_sessions_query(_context) do
+          # Match all entries with a session tag (pattern {:session, _})
+          match_spec tag: t, where: is_tuple(t) and elem(t, 0) == :session
+        end
+      end
+
+  > The combination of decorators, QueryHelper, and tagging provides a clean,
+  > declarative way to manage cache lifecycles with minimal boilerplate.
 
   ## Transaction API
 

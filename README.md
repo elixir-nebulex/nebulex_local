@@ -15,7 +15,7 @@ Add `:nebulex_local` to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:nebulex_local, "~> 3.0.0-rc.1"}
+    {:nebulex_local, "~> 3.0.0-rc.2"}
   ]
 end
 ```

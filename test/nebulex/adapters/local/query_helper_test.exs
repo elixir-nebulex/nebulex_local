@@ -188,9 +188,10 @@ defmodule Nebulex.Adapters.Local.QueryHelperTest do
       true = :ets.insert(table, {:entry, 3, "value3", 1200, :infinity, :tag_a})
       true = :ets.insert(table, {:entry, 4, 100, 1300, 2300, :tag_c})
       true = :ets.insert(table, {:entry, 5, 200, 1400, 2400, :tag_c})
+      true = :ets.insert(table, {:entry, {:key, 6}, 300, 1500, 2500, :tag_d})
 
       # Verify all entries were inserted
-      5 = :ets.info(table, :size)
+      assert :ets.info(table, :size) == 6
 
       on_exit(fn ->
         if :ets.whereis(table_name) != :undefined do
@@ -217,7 +218,7 @@ defmodule Nebulex.Adapters.Local.QueryHelperTest do
     test "selects entries with value guard", %{table: table} do
       ms = match_spec key: k, value: v, where: is_integer(v) and v > 100, select: {k, v}
 
-      assert :ets.select(table, ms) == [{5, 200}]
+      assert :ets.select(table, ms) |> Enum.sort() == [{5, 200}, {{:key, 6}, 300}] |> Enum.sort()
     end
 
     test "selects entries with exp guard", %{table: table} do
@@ -245,7 +246,8 @@ defmodule Nebulex.Adapters.Local.QueryHelperTest do
       assert Enum.sort(result) ==
                Enum.sort([
                  {:entry, 4, 100, 1300, 2300, :tag_c},
-                 {:entry, 5, 200, 1400, 2400, :tag_c}
+                 {:entry, 5, 200, 1400, 2400, :tag_c},
+                 {:entry, {:key, 6}, 300, 1500, 2500, :tag_d}
                ])
     end
 
@@ -265,14 +267,14 @@ defmodule Nebulex.Adapters.Local.QueryHelperTest do
       # Verify the entry was deleted
       assert :ets.lookup(table, 2) == []
       # Other entries should still exist
-      assert :ets.info(table, :size) == 4
+      assert :ets.info(table, :size) == 5
     end
 
     test "matches without guards", %{table: table} do
       ms = match_spec key: k, value: v, select: k
       result = :ets.select(table, ms)
 
-      assert Enum.sort(result) == [1, 2, 3, 4, 5]
+      assert Enum.sort(result) |> Enum.sort() == [1, 2, 3, 4, 5, {:key, 6}] |> Enum.sort()
     end
 
     test "matches with only specific field binding", %{table: table} do
@@ -293,6 +295,12 @@ defmodule Nebulex.Adapters.Local.QueryHelperTest do
       result = :ets.select(table, ms)
 
       assert Enum.sort(result) == [{4, 100}, {5, 200}]
+    end
+
+    test "selects entries with key as tuple", %{table: table} do
+      ms = match_spec key: k, value: v, where: k == {:key, 6}, select: {k, v}
+
+      assert :ets.select(table, ms) == [{{:key, 6}, 300}]
     end
   end
 

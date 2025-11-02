@@ -2,9 +2,9 @@ defmodule NebulexAdaptersLocal.MixProject do
   use Mix.Project
 
   @source_url "http://github.com/elixir-nebulex/nebulex_local"
-  @version "3.0.0-rc.1"
-  # @nbx_tag "3.0.0-rc.1"
-  # @nbx_vsn "3.0.0-rc.1"
+  @version "3.0.0-rc.2"
+  # @nbx_tag "3.0.0-rc.2"
+  # @nbx_vsn "3.0.0-rc.2"
 
   def project do
     [
@@ -56,6 +56,7 @@ defmodule NebulexAdaptersLocal.MixProject do
       {:sobelow, "~> 0.14", only: [:dev, :test], runtime: false},
       {:stream_data, "~> 1.2", only: [:dev, :test]},
       {:mimic, "~> 2.1", only: :test},
+      {:decorator, "~> 1.4", only: :test},
 
       # Benchmark Test
       {:benchee, "~> 1.4", only: [:dev, :test]},

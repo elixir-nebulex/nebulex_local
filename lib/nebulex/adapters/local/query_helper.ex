@@ -240,10 +240,7 @@ if Code.ensure_loaded?(Ex2ms) do
 
       # Build the tuple elements
       elements = [
-        :entry
-        | Enum.map(ordered_fields, fn field ->
-            Map.get(field_map, field, {:_, [], Elixir})
-          end)
+        :entry | Enum.map(ordered_fields, &Map.get(field_map, &1, {:_, [], Elixir}))
       ]
 
       # Return as a tuple AST node
