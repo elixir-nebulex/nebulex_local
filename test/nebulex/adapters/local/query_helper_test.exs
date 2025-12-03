@@ -310,7 +310,7 @@ defmodule Nebulex.Adapters.Local.QueryHelperTest do
 
       # Should return a valid ETS match spec (list of tuples)
       assert is_list(ms)
-      assert length(ms) == 1
+      assert Enum.count(ms) == 1
       assert {_pattern, _guards, _select} = hd(ms)
     end
 
@@ -318,7 +318,7 @@ defmodule Nebulex.Adapters.Local.QueryHelperTest do
       ms = keyref_match_spec(:user_123, cache: MyApp.Cache)
 
       assert is_list(ms)
-      assert length(ms) == 1
+      assert Enum.count(ms) == 1
     end
   end
 

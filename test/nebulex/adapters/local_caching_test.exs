@@ -145,7 +145,7 @@ defmodule Nebulex.Adapters.LocalCachingTest do
 
       # Verify reference entry exists for "user_1"
       ms = keyref_match_spec("user_1")
-      assert length(Cache.get_all!(query: ms)) == 1
+      assert Cache.get_all!(query: ms) |> Enum.count() == 1
 
       # Evict all references to "user_1"
       assert evict_user_references("user_1") == :ok
@@ -162,8 +162,8 @@ defmodule Nebulex.Adapters.LocalCachingTest do
       # Verify reference entries exist for both
       ms_user1 = keyref_match_spec("user_1")
       ms_user2 = keyref_match_spec("user_2")
-      assert length(Cache.get_all!(query: ms_user1)) == 1
-      assert length(Cache.get_all!(query: ms_user2)) == 1
+      assert Cache.get_all!(query: ms_user1) |> Enum.count() == 1
+      assert Cache.get_all!(query: ms_user2) |> Enum.count() == 1
 
       # Evict only references to "user_1"
       assert evict_user_references("user_1") == :ok
