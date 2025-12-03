@@ -767,7 +767,7 @@ defmodule Nebulex.Adapters.LocalTest do
 
         # All tasks should complete successfully without crashes
         results = Task.await_many(tasks, 5000)
-        assert length(results) == 20
+        assert Enum.count(results) == 20
       end
 
       test "fetch during generation deletion", %{cache: cache, name: name} do
@@ -789,7 +789,7 @@ defmodule Nebulex.Adapters.LocalTest do
 
         # All fetches should succeed (entries move to new generation on access)
         results = Task.await_many(tasks, 5000)
-        assert length(results) == 100
+        assert Enum.count(results) == 100
       end
 
       test "put operations during generation transitions", %{cache: cache, name: name} do
@@ -884,7 +884,7 @@ defmodule Nebulex.Adapters.LocalTest do
 
         # All increments should succeed
         results = Task.await_many(tasks, 5000)
-        assert length(results) == 50
+        assert Enum.count(results) == 50
 
         # Final counter value should reflect all increments
         final_value = cache.get!(:counter)

@@ -16,14 +16,6 @@ defmodule NebulexAdaptersLocal.MixProject do
 
       # Testing
       test_coverage: [tool: ExCoveralls, export: "test-coverage"],
-      preferred_cli_env: [
-        coveralls: :test,
-        "coveralls.detail": :test,
-        "coveralls.post": :test,
-        "coveralls.html": :test,
-        "coveralls.json": :test,
-        "test.ci": :test
-      ],
 
       # Dialyzer
       dialyzer: dialyzer(),
@@ -37,6 +29,19 @@ defmodule NebulexAdaptersLocal.MixProject do
         main: "Nebulex.Adapters.Local",
         source_ref: "v#{@version}",
         source_url: @source_url
+      ]
+    ]
+  end
+
+  def cli do
+    [
+      preferred_envs: [
+        coveralls: :test,
+        "coveralls.detail": :test,
+        "coveralls.post": :test,
+        "coveralls.html": :test,
+        "coveralls.json": :test,
+        "test.ci": :test
       ]
     ]
   end
@@ -59,11 +64,11 @@ defmodule NebulexAdaptersLocal.MixProject do
       {:decorator, "~> 1.4", only: :test},
 
       # Benchmark Test
-      {:benchee, "~> 1.4", only: [:dev, :test]},
+      {:benchee, "~> 1.5", only: [:dev, :test]},
       {:benchee_html, "~> 1.0", only: [:dev, :test]},
 
       # Docs
-      {:ex_doc, "~> 0.38", only: [:dev, :test], runtime: false}
+      {:ex_doc, "~> 0.39", only: [:dev, :test], runtime: false}
     ]
   end
 
