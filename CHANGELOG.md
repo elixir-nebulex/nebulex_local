@@ -1,6 +1,6 @@
 # Changelog
 
-## [v3.0.0-rc.2](https://github.com/elixir-nebulex/nebulex_local/tree/v3.0.0-rc.2) (2025-10-06)
+## [v3.0.0-rc.2](https://github.com/elixir-nebulex/nebulex_local/tree/v3.0.0-rc.2) (2025-12-07)
 > [Full Changelog](https://github.com/elixir-nebulex/nebulex_local/compare/v3.0.0-rc.1...v3.0.0-rc.2)
 
 ### Enhancements
@@ -37,7 +37,8 @@
   declarative syntax. The `:select` clause is optional and defaults to `true`,
   making count and delete operations more concise. This dramatically improves
   the developer experience when working with the queryable API, especially for
-  tag-based queries. Example: `match_spec value: v, tag: t, where: t == :group_a, select: v`.
+  tag-based queries. Example:
+  `match_spec value: v, tag: t, where: t == :group_a, select: v`.
   [#5](https://github.com/elixir-nebulex/nebulex_local/issues/5).
 - [Nebulex.Adapters.Local] Added `keyref_match_spec/2` helper function to
   `Nebulex.Adapters.Local.QueryHelper` for managing cache reference entries

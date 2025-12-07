@@ -8,6 +8,16 @@
 [![Hex Version](http://img.shields.io/hexpm/v/nebulex_local.svg)](http://hex.pm/packages/nebulex_local)
 [![Documentation](http://img.shields.io/badge/Documentation-ff69b4)](http://hexdocs.pm/nebulex_local)
 
+## About
+
+This adapter provides a high-performance generational local cache for Nebulex,
+inspired by [epocxy](https://github.com/duomark/epocxy). It uses a
+generational garbage collection with two-generation approach (new and old)
+for efficient memory management.
+
+See the [module documentation][online_docs] for detailed information about
+generational caching, concurrency handling, and configuration options.
+
 ## Installation
 
 Add `:nebulex_local` to your list of dependencies in `mix.exs`:
@@ -15,10 +25,23 @@ Add `:nebulex_local` to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:nebulex_local, "~> 3.0.0-rc.2"}
+    {:nebulex_local, "~> 3.0.0-rc.2"},
+    {:telemetry, "~> 0.4 or ~> 1.0"},    # For observability/telemetry support
+    {:shards, "~> 1.1"},                 # For high concurrency workloads with partitioning
+    {:ex2ms, "~> 1.7"}                   # For match specification query helpers
   ]
 end
 ```
+
+To provide more flexibility and load only the needed dependencies, this adapter
+makes some dependencies optional:
+
+  - **`:telemetry`** - Add when you want to emit and consume telemetry events
+    for monitoring cache operations (recommended).
+  - **`:shards`** - Add when using `backend: :shards` for intensive workloads
+    that benefit from partitioning across multiple ETS tables.
+  - **`:ex2ms`** - Add when using match specification query helpers for advanced
+    querying.
 
 ## Usage
 
@@ -76,7 +99,7 @@ to `nebulex`:
 export NEBULEX_PATH=nebulex
 ```
 
-Second, make sure you fetch `:nebulex` dependency directly from GtiHub
+Second, make sure you fetch `:nebulex` dependency directly from GitHub
 by running:
 
 ```
@@ -146,7 +169,7 @@ When submitting a pull request you should not update the
 [CHANGELOG.md](CHANGELOG.md), and also make sure you test your changes
 thoroughly, include unit tests alongside new or changed code.
 
-Before to submit a PR it is highly recommended to run `mix test.ci` and ensure
+Before submitting a PR it is highly recommended to run `mix test.ci` and ensure
 all checks run successfully.
 
 ## Copyright and License
