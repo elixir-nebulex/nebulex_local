@@ -22,11 +22,11 @@ defmodule Nebulex.Adapters.Local.GenerationTest do
                allocated_memory: nil,
                backend: :ets,
                backend_opts: [
-                 :set,
                  :public,
-                 {:keypos, 2},
-                 {:read_concurrency, true},
-                 {:write_concurrency, true}
+                 :set,
+                 keypos: 2,
+                 read_concurrency: true,
+                 write_concurrency: true
                ],
                gc_healthcheck_ref: nil,
                gc_heartbeat_ref: nil,
@@ -54,11 +54,11 @@ defmodule Nebulex.Adapters.Local.GenerationTest do
                allocated_memory: 1000,
                backend: :ets,
                backend_opts: [
-                 :set,
                  :public,
-                 {:keypos, 2},
-                 {:read_concurrency, true},
-                 {:write_concurrency, true}
+                 :set,
+                 keypos: 2,
+                 read_concurrency: true,
+                 write_concurrency: true
                ],
                gc_healthcheck_ref: gc_healthcheck_ref,
                gc_heartbeat_ref: gc_heartbeat_ref,

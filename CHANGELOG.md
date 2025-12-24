@@ -1,5 +1,25 @@
 # Changelog
 
+All notable changes to this project will be documented in this file.
+
+This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [v3.0.0-rc.3](https://github.com/elixir-nebulex/nebulex_local/tree/v3.0.0-rc.3) (2025-12-28)
+> [Full Changelog](https://github.com/elixir-nebulex/nebulex_local/compare/v3.0.0-rc.2...v3.0.0-rc.3)
+
+### Enhancements
+
+- [Nebulex.Adapters.Local] Implemented adapter-specific transaction support using
+  `Nebulex.Locks`, a lightweight ETS-based locking mechanism optimized for
+  single-node scenarios. This replaces the previous reliance on `:global` for
+  distributed locking, providing significantly better performance for local
+  cache transactions while maintaining the same public API. The locks manager
+  can be customized via the new `:lock_opts` configuration option (e.g.,
+  `:cleanup_interval`, `:cleanup_batch_size`). This change aligns with the
+  removal of the default transaction implementation from Nebulex core, allowing
+  adapters to provide implementations tailored to their specific needs.
+  [#7](https://github.com/elixir-nebulex/nebulex_local/issues/7).
+
 ## [v3.0.0-rc.2](https://github.com/elixir-nebulex/nebulex_local/tree/v3.0.0-rc.2) (2025-12-07)
 > [Full Changelog](https://github.com/elixir-nebulex/nebulex_local/compare/v3.0.0-rc.1...v3.0.0-rc.2)
 

@@ -27,8 +27,10 @@ defmodule Nebulex.Adapters.Local do
       (see `Nebulex.Adapters.Local.Generation`).
     * Sharding - For intensive workloads, the Cache may also be partitioned
       (by using `:shards` backend and specifying the `:partitions` option).
-    * Support for transactions via Erlang global name registration facility.
-      See `Nebulex.Adapter.Transaction`.
+    * Support for transactions via `Nebulex.Locks`, a lightweight ETS-based
+      locking mechanism optimized for single-node scenarios. Provides atomic
+      lock acquisition, deadlock prevention, and automatic stale lock cleanup.
+      See `Nebulex.Locks` and `Nebulex.Adapter.Transaction`.
     * Support for stats.
     * Automatic retry logic for handling race conditions during garbage
       collection (see [Concurrency and resilience](#module-concurrency-and-resilience)).
@@ -745,11 +747,19 @@ defmodule Nebulex.Adapters.Local do
 
   ## Transaction API
 
-  This adapter inherits the default implementation provided by
-  `Nebulex.Adapter.Transaction`. Therefore, the `transaction` command accepts
-  the following options:
+  This adapter implements the `Nebulex.Adapter.Transaction` behaviour using
+  `Nebulex.Locks`, a lightweight ETS-based locking mechanism optimized for
+  single-node scenarios. This implementation provides significantly better
+  performance compared to distributed locking mechanisms (e.g., `:global`)
+  while maintaining the same transaction API.
 
-  #{Nebulex.Adapter.Transaction.Options.options_docs()}
+  The `transaction` command accepts the following options:
+
+  #{Nebulex.Locks.Options.options_docs()}
+
+  The locks manager can be customized via the `:lock_opts` configuration
+  option when starting the cache. See the configuration options above for
+  more details.
 
   ## Extended API (extra functions)
 
@@ -775,9 +785,7 @@ defmodule Nebulex.Adapters.Local do
   @behaviour Nebulex.Adapter
   @behaviour Nebulex.Adapter.KV
   @behaviour Nebulex.Adapter.Queryable
-
-  # Inherit default transaction implementation
-  use Nebulex.Adapter.Transaction
+  @behaviour Nebulex.Adapter.Transaction
 
   # Inherit default info implementation
   use Nebulex.Adapters.Common.Info
@@ -790,6 +798,8 @@ defmodule Nebulex.Adapters.Local do
 
   alias Nebulex.Adapters.Common.Info.Stats
   alias Nebulex.Adapters.Local.{Backend, Generation, Metadata}
+  alias Nebulex.Locks
+  alias Nebulex.Locks.Options, as: LockOptions
   alias Nebulex.Time
 
   ## Types & Internal definitions
@@ -1314,6 +1324,61 @@ defmodule Nebulex.Adapters.Local do
 
     %{total: max_size, used: mem_size}
   end
+
+  ## Nebulex.Adapter.Transaction
+
+  @impl true
+  def transaction(%{cache: cache, pid: pid} = adapter_meta, fun, opts) do
+    opts = LockOptions.validate!(opts)
+
+    adapter_meta
+    |> do_in_transaction?()
+    |> do_transaction(
+      pid,
+      adapter_meta[:name] || cache,
+      adapter_meta.meta_tab,
+      opts,
+      fun
+    )
+  end
+
+  @impl true
+  def in_transaction?(adapter_meta, _opts) do
+    wrap_ok do_in_transaction?(adapter_meta)
+  end
+
+  defp do_in_transaction?(%{pid: pid}) do
+    !!Process.get({pid, self()})
+  end
+
+  defp do_transaction(true, _pid, _name, _meta_tab, _opts, fun) do
+    {:ok, fun.()}
+  end
+
+  defp do_transaction(false, pid, name, meta_tab, opts, fun) do
+    locks_table = Metadata.fetch!(meta_tab, :locks_table)
+    keys = Keyword.fetch!(opts, :keys)
+    ids = lock_ids(name, keys)
+
+    case Locks.acquire(locks_table, ids, opts) do
+      :ok ->
+        try do
+          _ = Process.put({pid, self()}, keys)
+
+          {:ok, fun.()}
+        after
+          _ = Process.delete({pid, self()})
+
+          Locks.release(locks_table, ids)
+        end
+
+      {:error, :timeout} ->
+        wrap_error Nebulex.Error, reason: :transaction_aborted, cache: name
+    end
+  end
+
+  defp lock_ids(name, []), do: [name]
+  defp lock_ids(name, keys), do: Enum.map(keys, &{name, &1})
 
   ## Helpers
 

@@ -40,10 +40,12 @@ if Code.ensure_loaded?(:shards) do
         |> Keyword.fetch!(:adapter_meta)
         |> Map.fetch!(:meta_tab)
 
-      sup_spec([
+      [
         {__MODULE__.DynamicSupervisor, meta_tab},
-        generation_spec(parse_opts(opts, partitions: partitions))
-      ])
+        locks_spec(opts),
+        generation_spec(opts, partitions: partitions)
+      ]
+      |> sup_spec()
     end
 
     @doc false

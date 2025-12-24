@@ -1,13 +1,28 @@
 defmodule Nebulex.Adapters.Local.Backend do
   @moduledoc false
 
+  alias Nebulex.Adapters.Local.Metadata
+
   @doc false
   defmacro __using__(_opts) do
     quote do
       alias Nebulex.Adapters.Local.Generation
 
-      defp generation_spec(opts) do
+      defp generation_spec(opts, extra \\ []) do
+        opts = parse_opts(opts, extra)
+
         Supervisor.child_spec({Generation, opts}, id: Module.concat([__MODULE__, GC]))
+      end
+
+      defp locks_spec(opts) do
+        meta_tab = Keyword.fetch!(opts, :adapter_meta).meta_tab
+        {lock_opts, _opts} = Keyword.pop!(opts, :lock_opts)
+
+        Supervisor.child_spec(
+          {Nebulex.Locks,
+           [init_callback: {unquote(__MODULE__), :init_callback, [meta_tab]}] ++ lock_opts},
+          id: Module.concat([__MODULE__, Locks])
+        )
       end
 
       defp sup_spec(children) do
@@ -29,13 +44,13 @@ defmodule Nebulex.Adapters.Local.Backend do
 
         backend_opts =
           [
-            type,
             :public,
-            {:keypos, 2},
-            {:read_concurrency, Keyword.fetch!(opts, :read_concurrency)},
-            {:write_concurrency, Keyword.fetch!(opts, :write_concurrency)},
+            type,
             compressed,
-            extra
+            extra,
+            keypos: 2,
+            read_concurrency: Keyword.fetch!(opts, :read_concurrency),
+            write_concurrency: Keyword.fetch!(opts, :write_concurrency)
           ]
           |> List.flatten()
           |> Enum.filter(&(&1 != :named_table))
@@ -65,6 +80,15 @@ defmodule Nebulex.Adapters.Local.Backend do
   def delete(backend, meta_tab, gen_tab) do
     get_mod(backend).delete(meta_tab, gen_tab)
   end
+
+  @doc """
+  Helper function for initializing the locks table.
+  """
+  def init_callback(table, meta_tab) do
+    Metadata.put(meta_tab, :locks_table, table)
+  end
+
+  ## Private functions
 
   defp get_mod(:ets), do: Nebulex.Adapters.Local.Backend.ETS
 

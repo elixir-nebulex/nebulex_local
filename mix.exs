@@ -3,6 +3,7 @@ defmodule NebulexAdaptersLocal.MixProject do
 
   @source_url "https://github.com/elixir-nebulex/nebulex_local"
   @version "3.0.0-rc.2"
+  @nbx_vsn "3.0.0-rc.2"
 
   def project do
     [
@@ -14,6 +15,7 @@ defmodule NebulexAdaptersLocal.MixProject do
 
       # Testing
       test_coverage: [tool: ExCoveralls, export: "test-coverage"],
+      test_ignore_filters: [~r{test/(shared|support)/.*\.exs}],
 
       # Dialyzer
       dialyzer: dialyzer(),
@@ -74,7 +76,7 @@ defmodule NebulexAdaptersLocal.MixProject do
     if path = System.get_env("NEBULEX_PATH") do
       {:nebulex, path: path}
     else
-      {:nebulex, @version}
+      {:nebulex, "~> #{@nbx_vsn}"}
     end
   end
 

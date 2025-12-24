@@ -144,6 +144,51 @@ defmodule Nebulex.Adapters.Local.Options do
       This grace period allows ongoing operations to complete before the
       generation is removed.
       """
+    ],
+    lock_opts: [
+      type: :keyword_list,
+      required: false,
+      default: [],
+      doc: """
+      Options to customize the locks manager used for cache transactions.
+
+      The local adapter uses `Nebulex.Locks` for implementing transactions with
+      an ETS-based locking mechanism optimized for single-node scenarios. This
+      option allows you to customize the behavior of the locks manager, such as
+      adjusting the cleanup interval or batch size for stale lock cleanup.
+
+      **Available Options:**
+
+        * `:cleanup_interval` - The interval in milliseconds for periodic
+          cleanup of stale locks (defaults to 5 minutes).
+        * `:cleanup_batch_size` - The number of locks to process per batch
+          during cleanup (defaults to 100).
+
+      Note: The `:name` and `:init_callback` options are managed internally by
+      the adapter and should not be provided. See the "Start Options" section
+      in `Nebulex.Locks` for all available options.
+
+      **Examples:**
+
+          # Use default lock options (recommended for most cases)
+          MyCache.start_link()
+
+          # Customize cleanup for high-throughput scenarios
+          MyCache.start_link(
+            lock_opts: [
+              cleanup_interval: :timer.minutes(1),
+              cleanup_batch_size: 500
+            ]
+          )
+
+          # More frequent cleanup for memory-constrained environments
+          MyCache.start_link(
+            lock_opts: [
+              cleanup_interval: :timer.seconds(30)
+            ]
+          )
+
+      """
     ]
   ]
 

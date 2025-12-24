@@ -240,11 +240,11 @@ defmodule Nebulex.Adapters.Local.Generation do
         |> Map.merge(adapter_meta)
       )
 
+    # Create a new generation
+    :ok = new_gen(state)
+
     # Timer ref
-    {:ok, ref} =
-      if state.gc_interval,
-        do: {new_gen(state), start_timer(state.gc_interval)},
-        else: {new_gen(state), nil}
+    ref = if state.gc_interval, do: start_timer(state.gc_interval)
 
     # Update state
     state = %{state | gc_heartbeat_ref: ref}
