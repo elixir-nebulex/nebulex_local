@@ -1383,7 +1383,16 @@ defmodule Nebulex.Adapters.Local do
   ## Helpers
 
   # Inline common instructions
-  @compile {:inline, fetch_entry: 4, pop_entry: 4, list_gen: 1, newer_gen: 1, match_key: 2}
+  @compile [
+    inline: [
+      fetch_entry: 4,
+      pop_entry: 4,
+      list_gen: 1,
+      newer_gen: 1,
+      entry_keys: 1,
+      match_key: 2
+    ]
+  ]
 
   @max_retries 3
   def with_retry(fun, retries \\ @max_retries)
@@ -1448,6 +1457,10 @@ defmodule Nebulex.Adapters.Local do
     meta_tab
     |> Metadata.fetch!(:generations)
     |> hd()
+  end
+
+  defp entry_keys(entries) do
+    Enum.map(entries, fn entry(key: key) -> key end)
   end
 
   defp validate_exp(entry(key: key, exp: exp) = entry, backend, tab, name) do
@@ -1529,7 +1542,7 @@ defmodule Nebulex.Adapters.Local do
   defp put_new_entries(meta_tab, backend, entries, chunk_size) when is_list(entries) do
     do_put_new_entries(meta_tab, backend, entries, fn newer_gen, older_gen ->
       with true <- backend.insert_new(older_gen, entries) do
-        keys = Enum.map(entries, fn entry(key: key) -> key end)
+        keys = entry_keys(entries)
 
         _ = do_delete_all(backend, older_gen, keys, chunk_size)
 
@@ -1556,13 +1569,7 @@ defmodule Nebulex.Adapters.Local do
       [newer_gen, older_gen] ->
         with false <- backend.update_element(newer_gen, key, updates),
              [entry() = entry] <- backend.take(older_gen, key) do
-          entry =
-            Enum.reduce(updates, entry, fn
-              {3, value}, acc -> entry(acc, value: value)
-              {4, value}, acc -> entry(acc, touched: value)
-              {5, value}, acc -> entry(acc, exp: value)
-              {6, value}, acc -> entry(acc, tag: value)
-            end)
+          entry = entry_updates(updates, entry)
 
           backend.insert(newer_gen, entry)
         else
@@ -1570,6 +1577,15 @@ defmodule Nebulex.Adapters.Local do
           other -> other
         end
     end
+  end
+
+  defp entry_updates(updates, entry) do
+    Enum.reduce(updates, entry, fn
+      {3, value}, acc -> entry(acc, value: value)
+      {4, value}, acc -> entry(acc, touched: value)
+      {5, value}, acc -> entry(acc, exp: value)
+      {6, value}, acc -> entry(acc, tag: value)
+    end)
   end
 
   defp do_count_all(backend, tab, keys, chunk_size) do

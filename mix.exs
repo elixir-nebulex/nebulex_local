@@ -114,8 +114,8 @@ defmodule NebulexAdaptersLocal.MixProject do
       flags: [
         :unmatched_returns,
         :error_handling,
+        :extra_return,
         :no_opaque,
-        :unknown,
         :no_return
       ]
     ]
