@@ -1,12 +1,12 @@
 # Nebulex Local
 > A generational local cache adapter for [Nebulex][Nebulex].
 
-[Nebulex]: http://github.com/cabol/nebulex
+[Nebulex]: https://github.com/cabol/nebulex
 
-![CI](http://github.com/elixir-nebulex/nebulex_local/workflows/CI/badge.svg)
-[![Codecov](http://codecov.io/gh/elixir-nebulex/nebulex_local/graph/badge.svg)](http://codecov.io/gh/elixir-nebulex/nebulex_local/graph/badge.svg)
-[![Hex Version](http://img.shields.io/hexpm/v/nebulex_local.svg)](http://hex.pm/packages/nebulex_local)
-[![Documentation](http://img.shields.io/badge/Documentation-ff69b4)](http://hexdocs.pm/nebulex_local)
+![CI](https://github.com/elixir-nebulex/nebulex_local/workflows/CI/badge.svg)
+[![Codecov](https://codecov.io/gh/elixir-nebulex/nebulex_local/graph/badge.svg)](https://codecov.io/gh/elixir-nebulex/nebulex_local)
+[![Hex Version](https://img.shields.io/hexpm/v/nebulex_local.svg)](https://hex.pm/packages/nebulex_local)
+[![Documentation](https://img.shields.io/badge/Documentation-ff69b4)](https://hexdocs.pm/nebulex_local)
 
 ## About
 
@@ -25,10 +25,11 @@ Add `:nebulex_local` to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:nebulex_local, "~> 3.0.0-rc.2"},
-    {:telemetry, "~> 0.4 or ~> 1.0"},    # For observability/telemetry support
-    {:shards, "~> 1.1"},                 # For high concurrency workloads with partitioning
-    {:ex2ms, "~> 1.7"}                   # For match specification query helpers
+    {:nebulex_local, "~> 3.0"},
+    {:telemetry, "~> 0.4 or ~> 1.0"}, # For observability/telemetry support
+    {:decorator, "~> 1.4"},           # For declarative caching
+    {:shards, "~> 1.1"},              # For high concurrency workloads with partitioning
+    {:ex2ms, "~> 1.7"}                # For match specification query helpers
   ]
 end
 ```
@@ -38,6 +39,8 @@ makes some dependencies optional:
 
   - **`:telemetry`** - Add when you want to emit and consume telemetry events
     for monitoring cache operations (recommended).
+   - **`:decorator`** - Add when you want to enable declarative decorator-based
+    caching (recommended).
   - **`:shards`** - Add when using `backend: :shards` for intensive workloads
     that benefit from partitioning across multiple ETS tables.
   - **`:ex2ms`** - Add when using match specification query helpers for advanced
@@ -84,7 +87,7 @@ end
 
 See the [online documentation][online_docs] for more information.
 
-[online_docs]: http://hexdocs.pm/nebulex_local/
+[online_docs]: https://hexdocs.pm/nebulex_local/
 
 ## Testing
 
@@ -153,7 +156,7 @@ $ MIX_ENV=test mix run benchmarks/local_with_shards_bench.exs
 ```
 
 Additionally, you can also run performance tests using `:basho_bench`.
-See [nebulex_bench example](http://github.com/elixir-nebulex/nebulex_examples/tree/master/nebulex_bench)
+See [nebulex_bench example](https://github.com/elixir-nebulex/nebulex_examples/tree/master/nebulex_bench)
 for more information.
 
 ## Contributing

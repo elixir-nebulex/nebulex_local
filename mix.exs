@@ -2,8 +2,8 @@ defmodule NebulexAdaptersLocal.MixProject do
   use Mix.Project
 
   @source_url "https://github.com/elixir-nebulex/nebulex_local"
-  @version "3.0.0-rc.2"
-  @nbx_vsn "3.0.0-rc.2"
+  @version "3.0.0-dev"
+  # @nbx_vsn "3.0.0"
 
   def project do
     [
@@ -20,16 +20,15 @@ defmodule NebulexAdaptersLocal.MixProject do
       # Dialyzer
       dialyzer: dialyzer(),
 
+      # Usage Rules
+      usage_rules: usage_rules(),
+
       # Hex
       package: package(),
       description: "A generational local cache adapter for Nebulex",
 
       # Docs
-      docs: [
-        main: "Nebulex.Adapters.Local",
-        source_ref: "v#{@version}",
-        source_url: @source_url
-      ]
+      docs: docs()
     ]
   end
 
@@ -59,16 +58,19 @@ defmodule NebulexAdaptersLocal.MixProject do
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:sobelow, "~> 0.14", only: [:dev, :test], runtime: false},
-      {:stream_data, "~> 1.2", only: [:dev, :test]},
-      {:mimic, "~> 2.1", only: :test},
-      {:decorator, "~> 1.4", only: :test},
+      {:stream_data, "~> 1.2", only: :test},
+      {:mimic, "~> 2.0", only: :test},
+      {:decorator, "~> 1.4", only: [:dev, :test]},
 
       # Benchmark Test
       {:benchee, "~> 1.5", only: [:dev, :test]},
       {:benchee_html, "~> 1.0", only: [:dev, :test]},
 
+      # Usage Rules
+      {:usage_rules, "~> 1.0", only: [:dev]},
+
       # Docs
-      {:ex_doc, "~> 0.39", only: [:dev, :test], runtime: false}
+      {:ex_doc, "~> 0.40", only: [:dev, :test], runtime: false}
     ]
   end
 
@@ -76,7 +78,7 @@ defmodule NebulexAdaptersLocal.MixProject do
     if path = System.get_env("NEBULEX_PATH") do
       {:nebulex, path: path}
     else
-      {:nebulex, "~> #{@nbx_vsn}"}
+      {:nebulex, github: "elixir-nebulex/nebulex", branch: "main"}
     end
   end
 
@@ -93,7 +95,8 @@ defmodule NebulexAdaptersLocal.MixProject do
         "coveralls.html",
         "sobelow --exit --skip",
         "dialyzer --format short"
-      ]
+      ],
+      "ur.sync": ["usage_rules.sync"]
     ]
   end
 
@@ -104,6 +107,25 @@ defmodule NebulexAdaptersLocal.MixProject do
       licenses: ["MIT"],
       links: %{"GitHub" => @source_url},
       files: ~w(lib .formatter.exs mix.exs README* CHANGELOG* LICENSE*)
+    ]
+  end
+
+  defp docs do
+    [
+      main: "Nebulex.Adapters.Local",
+      source_ref: "v#{@version}",
+      source_url: @source_url,
+      canonical: "https://hexdocs.pm/nebulex_local",
+      groups_for_modules: [
+        # Nebulex.Adapters.Local
+        # Nebulex.Locks
+
+        "Adapter helpers": [
+          Nebulex.Adapters.Local.QueryHelper,
+          Nebulex.Adapters.Local.Generation,
+          Nebulex.Adapters.Local.Options
+        ]
+      ]
     ]
   end
 
@@ -122,6 +144,25 @@ defmodule NebulexAdaptersLocal.MixProject do
   end
 
   defp plt_file_name do
-    "dialyzer-#{Mix.env()}-#{System.otp_release()}-#{System.version()}.plt"
+    "dialyzer-#{Mix.env()}-#{System.version()}-#{System.otp_release()}.plt"
+  end
+
+  defp usage_rules do
+    [
+      # The file to write usage rules into (required for usage_rules syncing)
+      file: "AGENTS.md",
+
+      # rules to include directly in CLAUDE.md
+      usage_rules: ["nebulex:all"],
+
+      # Agent skills configuration
+      skills: [
+        # The location of the skills directory
+        location: ".claude/skills",
+
+        # Auto-build a "use-<pkg>" skill per dependency
+        deps: [:nebulex]
+      ]
+    ]
   end
 end
