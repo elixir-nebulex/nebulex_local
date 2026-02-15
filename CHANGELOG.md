@@ -19,6 +19,9 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   removal of the default transaction implementation from Nebulex core, allowing
   adapters to provide implementations tailored to their specific needs.
   [#7](https://github.com/elixir-nebulex/nebulex_local/issues/7).
+- [Nebulex.Locks] Improved retry behavior when `:retry_interval` is `0` by
+  handling immediate retries without jitter. This prevents errors during lock
+  acquisition retries and keeps zero-delay retry strategies working as expected.
 
 ## [v3.0.0-rc.2](https://github.com/elixir-nebulex/nebulex_local/tree/v3.0.0-rc.2) (2025-12-07)
 > [Full Changelog](https://github.com/elixir-nebulex/nebulex_local/compare/v3.0.0-rc.1...v3.0.0-rc.2)

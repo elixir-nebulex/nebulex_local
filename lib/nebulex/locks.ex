@@ -252,6 +252,10 @@ defmodule Nebulex.Locks do
   This function is typically called in an `after` block to ensure
   locks are released even if an exception occurs.
 
+  This API assumes trusted callers: it does not verify lock ownership
+  when deleting lock entries. Releasing keys not owned by the current
+  process is considered undefined behavior.
+
   The first parameter can be either a named table (atom) or a table reference.
 
   ## Examples
@@ -474,8 +478,12 @@ defmodule Nebulex.Locks do
     end
   end
 
-  # Sleep with random jitter to prevent thundering herd (integer or :infinity)
-  defp sleep_with_jitter(interval, _attempt) do
+  # Sleep with random jitter to prevent thundering herd (fixed interval)
+  defp sleep_with_jitter(0, _attempt) do
+    :ok
+  end
+
+  defp sleep_with_jitter(interval, _attempt) when is_integer(interval) and interval > 0 do
     jitter = :rand.uniform(interval)
     sleep_time = interval + jitter
 

@@ -253,6 +253,17 @@ defmodule Nebulex.LocksTest do
 
       assert Locks.release(table, [:zero_retry_key]) == :ok
     end
+
+    test "retry_interval zero performs immediate retries without crashing", %{table: table} do
+      # First process locks a key
+      assert Locks.acquire(table, [:zero_interval_key]) == :ok
+
+      # Integer retry_interval: 0 should not crash and should timeout quickly
+      assert Locks.acquire(table, [:zero_interval_key], retries: 2, retry_interval: 0) ==
+               {:error, :timeout}
+
+      assert Locks.release(table, [:zero_interval_key]) == :ok
+    end
   end
 
   describe "periodic cleanup" do

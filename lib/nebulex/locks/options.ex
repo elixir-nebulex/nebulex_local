@@ -85,8 +85,8 @@ defmodule Nebulex.Locks.Options do
       """
     ],
     retry_interval: [
-      type: {:or, [:timeout, {:fun, 1}]},
-      type_doc: "`t:timeout/0` | `(attempt :: non_neg_integer() -> timeout())`",
+      type: {:or, [:non_neg_integer, {:fun, 1}]},
+      type_doc: "`t:non_neg_integer/0` | `(attempt :: non_neg_integer() -> non_neg_integer())`",
       required: false,
       default: 10,
       doc: """
@@ -94,11 +94,9 @@ defmodule Nebulex.Locks.Options do
 
       Can be either:
 
-        * A timeout value (`non_neg_integer()` or `:infinity`) - A fixed
-          interval. When using a non-negative integer, a small random jitter is
-          added to prevent thundering herd issues. The value `:infinity` is
-          accepted for type compatibility but not recommended (would block
-          indefinitely).
+        * A timeout value (`non_neg_integer()`) - A fixed interval. When using
+          a non-negative integer, a small random jitter is added to prevent
+          thundering herd issues.
         * An anonymous function - Receives the current attempt number
           (0-indexed) and must return a non-negative integer representing the
           interval in milliseconds. No jitter is added, giving you full control
