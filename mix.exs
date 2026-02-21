@@ -2,8 +2,7 @@ defmodule NebulexAdaptersLocal.MixProject do
   use Mix.Project
 
   @source_url "https://github.com/elixir-nebulex/nebulex_local"
-  @version "3.0.0-dev"
-  # @nbx_vsn "3.0.0"
+  @version "3.0.0"
 
   def project do
     [
@@ -78,7 +77,7 @@ defmodule NebulexAdaptersLocal.MixProject do
     if path = System.get_env("NEBULEX_PATH") do
       {:nebulex, path: path}
     else
-      {:nebulex, github: "elixir-nebulex/nebulex", branch: "main"}
+      {:nebulex, "~> 3.0"}
     end
   end
 
