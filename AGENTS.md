@@ -1,28 +1,28 @@
-## Local Scope First (`nebulex_local`)
+## nebulex_local — Project Context
 
-This repository is `nebulex_local` (the local adapter), not Nebulex core.
-When imported Nebulex sections mention `usage-rules/*.md` paths or core files,
-map them to this repository context first.
+This is the `nebulex_local` package, part of the
+[elixir-nebulex](https://github.com/elixir-nebulex) organization.
 
-### Local Rule Precedence (for this repo)
+Read `guides/learning/architecture.md` first — it covers why this package
+exists, how generational caching works, the module structure, implemented
+behaviours, and non-negotiable contribution rules.
 
-1. This local preface.
+### Running Tests
+
+```bash
+# With local nebulex core checkout (recommended during development)
+NEBULEX_PATH=~/path/to/nebulex mix test
+
+# Against published nebulex package
+mix test
+```
+
+### Local Rule Precedence
+
+1. This preface.
 2. `nebulex:workflow` section in this file.
 3. `nebulex:nebulex` section in this file (as framework guidance).
 4. `nebulex:elixir-style` and `nebulex:elixir` sections in this file.
-
-### Local Key Files
-
-- `lib/nebulex/adapters/local.ex` - Local adapter implementation.
-- `lib/nebulex/locks.ex` - Local lock/transaction coordination.
-- `lib/nebulex/adapters/local/options.ex` - Adapter option definitions/docs.
-- `test/nebulex/adapters/local_ets_test.exs` - Default ETS adapter tests.
-- `test/nebulex/adapters/local_shards_test.exs` - Shards adapter tests.
-- `test/nebulex/adapters/local/` - Generation, info, and query tests.
-- `test/nebulex/locks_test.exs` - Locking and retry behavior tests.
-- `test/shared/local_test_case.exs` - Shared test case for the adapter.
-- `README.md` - Public usage/configuration for this adapter.
-- `CHANGELOG.md` - Adapter release history.
 
 <!-- usage-rules-start -->
 <!-- nebulex:workflow-start -->

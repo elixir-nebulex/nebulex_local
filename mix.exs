@@ -115,6 +115,13 @@ defmodule NebulexAdaptersLocal.MixProject do
       source_ref: "v#{@version}",
       source_url: @source_url,
       canonical: "https://hexdocs.pm/nebulex_local",
+      extra_section: "GUIDES",
+      extras: [
+        "guides/learning/architecture.md"
+      ],
+      groups_for_extras: [
+        Learning: ~r{guides/learning/[^\/]+\.md}
+      ],
       groups_for_modules: [
         # Nebulex.Adapters.Local
         # Nebulex.Locks
