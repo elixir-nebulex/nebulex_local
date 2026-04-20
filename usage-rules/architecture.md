@@ -172,7 +172,7 @@ guide is worse than no guide.
 mix test.ci
 ```
 
-### 5. `mix docs` must produce no warnings
+### 6. `mix docs` must produce no warnings
 
 ```bash
 mix docs
