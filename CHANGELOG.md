@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Bug fixes
+
+- [Nebulex.Adapters.Local] Fixed two race conditions in the promotion of
+  entries from the older generation into the newer one on `fetch` (and the
+  commands built on it). First, the promotion removed the entry from the
+  older generation before it inserted the entry into the newer one; during
+  that window, a concurrent read of the same key reported a false miss for
+  a cached entry. The promotion now inserts first and deletes after, and a
+  reader that misses both generations checks the newer one again before it
+  reports a miss. Second, the promotion could override a value a concurrent
+  write had already stored for the same key; the promotion now uses
+  `insert_new`, so the concurrent write wins.
+  [#10](https://github.com/elixir-nebulex/nebulex_local/issues/10).
+
 ## [v3.0.0](https://github.com/elixir-nebulex/nebulex_local/tree/v3.0.0) (2026-02-21)
 > [Full Changelog](https://github.com/elixir-nebulex/nebulex_local/compare/v3.0.0-rc.2...v3.0.0)
 

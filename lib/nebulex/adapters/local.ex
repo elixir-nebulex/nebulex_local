@@ -936,12 +936,31 @@ defmodule Nebulex.Adapters.Local do
   end
 
   defp do_fetch([newer, older], name, backend, key) do
-    with {:error, _} <- fetch_entry(name, backend, newer, key),
-         {:ok, cached} <- pop_entry(name, backend, older, key) do
-      true = backend.insert(newer, cached)
-
-      {:ok, cached}
+    with {:error, _} <- fetch_entry(name, backend, newer, key) do
+      name
+      |> fetch_entry(backend, older, key)
+      |> maybe_promote_entry(name, backend, newer, older, key)
     end
+  end
+
+  # An entry found in the older generation is moved into the newer one. The
+  # entry is inserted into the newer generation first and deleted from the
+  # older one after, so the entry is visible in at least one generation at
+  # all times. `insert_new/2` makes sure the promotion does not override a
+  # value a concurrent write may have already stored for the same key.
+  defp maybe_promote_entry({:ok, cached}, _name, backend, newer, older, key) do
+    _ = backend.insert_new(newer, cached)
+    true = backend.delete(older, key)
+
+    {:ok, cached}
+  end
+
+  defp maybe_promote_entry({:error, _} = error, name, backend, newer, _older, key) do
+    # A concurrent reader may have promoted the entry into the newer
+    # generation between the two lookups; check the newer generation again
+    # before reporting a miss. Return the original error to keep the reason
+    # (e.g., `:expired`).
+    with {:error, _} <- fetch_entry(name, backend, newer, key), do: error
   end
 
   @impl true

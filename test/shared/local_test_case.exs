@@ -903,6 +903,33 @@ defmodule Nebulex.Adapters.LocalTest do
         assert Enum.count(results) == 100
       end
 
+      test "concurrent fetches of the same keys report no false misses", %{
+        cache: cache,
+        name: name
+      } do
+        keys = Enum.to_list(1..500)
+
+        # Concurrent readers race on the promotion of the same keys from the
+        # older generation into the newer one. A cached entry must never be
+        # reported as a miss.
+        for _round <- 1..4 do
+          :ok = cache.put_all(Enum.map(keys, &{&1, &1}))
+
+          _ = new_generation(cache, name)
+
+          tasks =
+            for _ <- 1..8 do
+              task_async(cache, name, fn ->
+                Enum.count(keys, &match?({:error, _}, cache.fetch(&1)))
+              end)
+            end
+
+          misses = Task.await_many(tasks, :timer.seconds(30))
+
+          assert Enum.sum(misses) == 0
+        end
+      end
+
       test "put operations during generation transitions", %{cache: cache, name: name} do
         # Initial data
         :ok = cache.put_all(for x <- 1..50, do: {x, x})
