@@ -122,7 +122,7 @@ setting `backend: :shards` in config.
 
 ```bash
 # With local nebulex core checkout (recommended during development)
-NEBULEX_PATH=~/dev/cabol/elixir/nebulex_repos/v3/nebulex mix test
+NEBULEX_PATH=nebulex mix test
 
 # Against published nebulex package
 mix test

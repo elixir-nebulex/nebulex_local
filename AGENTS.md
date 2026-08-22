@@ -3,7 +3,7 @@
 This is the `nebulex_local` package, part of the
 [elixir-nebulex](https://github.com/elixir-nebulex) organization.
 
-Read `guides/learning/architecture.md` first — it covers why this package
+Read `usage-rules/architecture.md` first — it covers why this package
 exists, how generational caching works, the module structure, implemented
 behaviours, and non-negotiable contribution rules.
 
@@ -61,7 +61,7 @@ At the start of each session, quickly establish context:
 2. Run `git log --oneline -20` to see recent changes.
 3. Run `git branch -a` to see active branches and current branch.
 4. Read `README.md` and the latest section of `CHANGELOG.md`.
-5. Read `guides/learning/architecture.md` for project architecture,
+5. Read `usage-rules/architecture.md` for project architecture,
    layer boundaries, and non-negotiable contribution rules.
 6. Check `.tool-versions` or the `elixir` version in `mix.exs` for
    supported Elixir/OTP versions.
@@ -192,7 +192,7 @@ provides:
 
 ## Architecture & Key Files
 
-> Read `guides/learning/architecture.md` for full architecture context,
+> Read `usage-rules/architecture.md` for full architecture context,
 > module hierarchy, layer boundaries, and non-negotiable contribution rules.
 > The section below is a quick-reference complement to that guide.
 
@@ -210,7 +210,7 @@ provides:
 | `mix.exs` | Dependencies and project config |
 | `CHANGELOG.md` | Release history and breaking changes |
 | `test/` | Test suite (mirrors `lib/` structure) |
-| `guides/learning/architecture.md` | Architecture, non-negotiables, source of truth hierarchy |
+| `usage-rules/architecture.md` | Architecture, non-negotiables, source of truth hierarchy |
 | `guides/` | User-facing guides, behavioral references, and examples |
 | `guides/upgrading/v3.0.md` | v3 migration guide |
 
