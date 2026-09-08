@@ -470,6 +470,22 @@ defmodule Nebulex.Adapters.LocalTest do
         assert cache.count_all!() == 0
       end
 
+      test "queries with {:in, keys} handle a large number of non-indexable keys", %{
+        cache: cache
+      } do
+        # A single match spec matching all these map keys would exceed the
+        # ETS guard-depth limit (`SystemLimitError` at ~1300 keys); the
+        # adapter must chunk them.
+        keys = for i <- 1..2000, do: %{i: i}
+
+        :ok = cache.put_all(Enum.map(keys, &{&1, 1}))
+
+        assert cache.count_all!(in: keys) == 2000
+        assert cache.stream!([in: keys], max_entries: 2000) |> Enum.count() == 2000
+        assert cache.delete_all!(in: keys) == 2000
+        assert cache.count_all!(in: keys) == 0
+      end
+
       test "queries with {:in, keys} ignore duplicated keys", %{cache: cache} do
         :ok = cache.put_all(a: 1, b: 2)
 
