@@ -279,9 +279,10 @@ defmodule Nebulex.Adapters.Local do
   ### `{:in, keys}` queries
 
   Queries with `{:in, keys}` (e.g., `MyCache.get_all(in: keys)`) are executed
-  as key-indexed operations, one per key, so their cost is proportional to the
-  number of given keys (`O(keys)`) regardless of the cache size. Duplicated
-  keys in the list are processed only once. Bear in mind:
+  as key-indexed operations for keys that can be bound in an ETS match head
+  (see the exception below), so their cost is proportional to the number of
+  given keys (`O(keys)`) rather than the cache size. Duplicated keys in the
+  list are processed only once. Bear in mind:
 
     * `get_all` behaves like `fetch/2` on each key: if an entry is found in
       the older generation, it is moved into the newer one, and expired
@@ -292,11 +293,18 @@ defmodule Nebulex.Adapters.Local do
     * Keys that can't be bound in an ETS match head — `:_`, `:"$N"` atoms,
       maps, structs, or terms containing them — aren't indexable. `get_all`
       is unaffected, since it looks these up directly. `count_all`,
-      `delete_all`, and `stream` instead match every such key given in one
-      call with a single extra table scan (not one scan per key), so a call
-      that mixes a few of these keys among many ordinary ones stays cheap;
-      a call given only such keys still costs one scan proportional to the
-      cache size.
+      `delete_all`, and `stream` instead match such keys in batches, each
+      batch costing one table scan per generation (for `stream`, per
+      `:max_entries` chunk), so a call that mixes a few of these keys among
+      many ordinary ones stays cheap; a call given only such keys still
+      costs scans proportional to the cache size.
+    * On `:ordered_set` tables, all four operations compare keys with the
+      table's native `==` semantics, consistent with the single-key commands
+      (e.g., an entry stored under the integer `1` matches the key `1.0`),
+      and `==`-equal duplicate keys are processed only once. `count_all`,
+      `delete_all`, and `stream` look the keys up directly instead of using
+      match specs, and `delete_all` lazily removes (without counting)
+      expired entries stored under the given keys.
 
   ## Building Match Specs with QueryHelper
 
@@ -863,6 +871,11 @@ defmodule Nebulex.Adapters.Local do
     tag: nil
   )
 
+  # Max number of non-indexable keys matched by a single match spec. ETS
+  # raises `SystemLimitError` when the nested `:orelse` guard grows too
+  # deep; the limit is around 1300 terms.
+  @unsafe_keys_chunk_size 100
+
   ## Nebulex.Adapter
 
   @impl true
@@ -928,6 +941,7 @@ defmodule Nebulex.Adapters.Local do
       meta_tab: meta_tab,
       stats_counter: stats_counter,
       backend: backend,
+      backend_type: Keyword.fetch!(opts, :backend_type),
       started_at: DateTime.utc_now()
     }
 
@@ -1193,6 +1207,47 @@ defmodule Nebulex.Adapters.Local do
     end
   end
 
+  # On `:ordered_set` tables, ETS compares keys with `==` on `lookup`/`take`
+  # (an entry stored under the integer 1 is found by a lookup for 1.0), while
+  # match specs compare with `=:=`. `{:in, keys}` queries on this backend type
+  # go through `lookup`/`take` instead of match specs, so the whole query API
+  # agrees with the single-key commands. Results are counted by distinct
+  # stored key, so `==`-equal request duplicates and transient
+  # cross-generation copies are processed once.
+  defp do_execute(
+         %{meta_tab: meta_tab, backend: backend, backend_type: :ordered_set},
+         %{op: :count_all, query: {:in, keys}},
+         _opts
+       )
+       when is_list(keys) do
+    keys = Enum.uniq(keys)
+
+    with_retry(fn ->
+      meta_tab
+      |> lookup_keys(backend, keys)
+      |> Enum.uniq_by(fn entry(key: key) -> key end)
+      |> length()
+      |> wrap_ok()
+    end)
+  end
+
+  defp do_execute(
+         %{meta_tab: meta_tab, backend: backend, backend_type: :ordered_set},
+         %{op: :delete_all, query: {:in, keys}},
+         _opts
+       )
+       when is_list(keys) do
+    keys = Enum.uniq(keys)
+
+    with_retry(fn ->
+      meta_tab
+      |> take_keys(backend, keys)
+      |> Enum.uniq_by(fn entry(key: key) -> key end)
+      |> length()
+      |> wrap_ok()
+    end)
+  end
+
   defp do_execute(
          %{meta_tab: meta_tab, backend: backend},
          %{op: :count_all, query: {:in, keys}},
@@ -1226,6 +1281,10 @@ defmodule Nebulex.Adapters.Local do
 
       meta_tab
       |> list_gen()
+      # Generations are newest-first; visit the older generation first, so
+      # an entry being promoted (inserted into the newer generation before
+      # it is deleted from the older one) cannot slip past both scans.
+      |> Enum.reverse()
       |> Enum.reduce(0, fn gen, acc ->
         do_delete_all(backend, gen, keys, now) + acc
       end)
@@ -1234,7 +1293,7 @@ defmodule Nebulex.Adapters.Local do
   end
 
   defp do_execute(
-         %{name: name, meta_tab: meta_tab, backend: backend},
+         %{name: name, meta_tab: meta_tab, backend: backend, backend_type: backend_type},
          %{op: :get_all, query: {:in, keys}, select: select},
          _opts
        )
@@ -1248,8 +1307,10 @@ defmodule Nebulex.Adapters.Local do
       |> Enum.flat_map(fn key ->
         generations
         |> do_fetch(name, backend, key)
-        |> select_entries(select)
+        |> ok_entries()
       end)
+      |> maybe_dedup_entries(backend_type)
+      |> Enum.map(fn entry(key: key, value: value) -> entry_return(select, key, value) end)
       |> wrap_ok()
     end)
   end
@@ -1282,6 +1343,24 @@ defmodule Nebulex.Adapters.Local do
   @impl true
   def stream(adapter_meta, query_meta, opts) do
     do_stream(adapter_meta, query_meta, opts)
+  end
+
+  # See the `:ordered_set` note on the `do_execute/3` clauses: keys are
+  # looked up directly (native `==` comparison) instead of matched with
+  # specs, and results are deduplicated by stored key so `==`-equal request
+  # keys yield the entry once.
+  defp do_stream(
+         %{meta_tab: meta_tab, backend: backend, backend_type: :ordered_set},
+         %{query: {:in, keys}, select: select},
+         opts
+       ) do
+    keys
+    |> Stream.uniq()
+    |> Stream.chunk_every(Keyword.fetch!(opts, :max_entries))
+    |> Stream.flat_map(&lookup_keys(meta_tab, backend, &1))
+    |> Stream.uniq_by(fn entry(key: key) -> key end)
+    |> Stream.map(fn entry(key: key, value: value) -> entry_return(select, key, value) end)
+    |> wrap_ok()
   end
 
   defp do_stream(
@@ -1343,15 +1422,46 @@ defmodule Nebulex.Adapters.Local do
         Enum.flat_map(generations, &backend.select(&1, ms))
       end)
 
-    case unsafe do
-      [] ->
-        safe_results
+    unsafe_results =
+      unsafe
+      |> Enum.chunk_every(@unsafe_keys_chunk_size)
+      |> Enum.flat_map(fn chunk ->
+        ms = unsafe_keys_match_spec(chunk, select, now)
 
-      _ ->
-        ms = unsafe_keys_match_spec(unsafe, select, now)
+        Enum.flat_map(generations, &backend.select(&1, ms))
+      end)
 
-        safe_results ++ Enum.flat_map(generations, &backend.select(&1, ms))
-    end
+    safe_results ++ unsafe_results
+  end
+
+  # Read-only per-key lookups for `count_all` and `stream` on `:ordered_set`
+  # tables; expired entries are skipped but left in the table.
+  defp lookup_keys(meta_tab, backend, keys) do
+    now = Time.now()
+    generations = list_gen(meta_tab)
+
+    for key <- keys,
+        gen <- generations,
+        entry(exp: exp) = entry <- backend.lookup(gen, key),
+        exp == :infinity or now < exp,
+        do: entry
+  end
+
+  # Per-key removals for `delete_all` on `:ordered_set` tables. Generations
+  # are newest-first; visit the older generation first, so an entry being
+  # promoted (inserted into the newer generation before it is deleted from
+  # the older one) cannot slip past both removals. `take` also removes an
+  # expired entry stored under the key (lazy expiration), but expired
+  # entries are filtered out here so they are not counted.
+  defp take_keys(meta_tab, backend, keys) do
+    now = Time.now()
+    generations = meta_tab |> list_gen() |> Enum.reverse()
+
+    for key <- keys,
+        gen <- generations,
+        entry(exp: exp) = entry <- backend.take(gen, key),
+        exp == :infinity or now < exp,
+        do: entry
   end
 
   ## Nebulex.Adapter.Info
@@ -1649,10 +1759,11 @@ defmodule Nebulex.Adapters.Local do
         backend.select_count(tab, key_match_spec(key, now)) + acc
       end)
 
-    case unsafe do
-      [] -> count
-      _ -> count + backend.select_count(tab, unsafe_keys_match_spec(unsafe, now))
-    end
+    unsafe
+    |> Enum.chunk_every(@unsafe_keys_chunk_size)
+    |> Enum.reduce(count, fn chunk, acc ->
+      backend.select_count(tab, unsafe_keys_match_spec(chunk, now)) + acc
+    end)
   end
 
   defp do_delete_all(backend, tab, keys, now) do
@@ -1663,10 +1774,11 @@ defmodule Nebulex.Adapters.Local do
         backend.select_delete(tab, key_match_spec(key, now)) + acc
       end)
 
-    case unsafe do
-      [] -> count
-      _ -> count + backend.select_delete(tab, unsafe_keys_match_spec(unsafe, now))
-    end
+    unsafe
+    |> Enum.chunk_every(@unsafe_keys_chunk_size)
+    |> Enum.reduce(count, fn chunk, acc ->
+      backend.select_delete(tab, unsafe_keys_match_spec(chunk, now)) + acc
+    end)
   end
 
   defp return({:ok, entry(value: value)}, :value) do
@@ -1681,16 +1793,20 @@ defmodule Nebulex.Adapters.Local do
     other
   end
 
-  defp select_entries({:ok, entries}, select) when is_list(entries) do
-    for entry(key: key, value: value) <- entries, do: entry_return(select, key, value)
+  defp ok_entries({:ok, entries}) when is_list(entries), do: entries
+  defp ok_entries({:ok, entry() = entry}), do: [entry]
+  defp ok_entries({:error, _}), do: []
+
+  # On `:ordered_set` tables, `==`-equal keys (e.g. `1` and `1.0`) alias the
+  # same stored entry, so fetching several of them returns duplicates; keep
+  # one entry per stored key. Other table types cannot alias keys (`bag` and
+  # `duplicate_bag` legitimately hold several entries per key).
+  defp maybe_dedup_entries(entries, :ordered_set) do
+    Enum.uniq_by(entries, fn entry(key: key) -> key end)
   end
 
-  defp select_entries({:ok, entry(key: key, value: value)}, select) do
-    [entry_return(select, key, value)]
-  end
-
-  defp select_entries({:error, _}, _select) do
-    []
+  defp maybe_dedup_entries(entries, _backend_type) do
+    entries
   end
 
   defp entry_return(:key, key, _value), do: key
@@ -1804,8 +1920,10 @@ defmodule Nebulex.Adapters.Local do
   end
 
   # Match spec for a batch of keys that can't be bound in the match head
-  # (see `safe_match_head_key?/1`). All such keys are matched with a single
-  # scan (one `:orelse`-chained guard), instead of one scan per key.
+  # (see `safe_match_head_key?/1`). A batch is matched with a single scan
+  # (one `:orelse`-chained guard) instead of one scan per key; callers chunk
+  # the keys to `@unsafe_keys_chunk_size` per spec to stay under the ETS
+  # guard-depth limit.
   defp unsafe_keys_match_spec(keys, now) do
     [
       {
