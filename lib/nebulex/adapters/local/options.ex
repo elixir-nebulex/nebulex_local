@@ -82,8 +82,7 @@ defmodule Nebulex.Adapters.Local.Options do
       doc: """
       Deprecated: This option is no longer used and will be removed in the
       next major release. Purging the older generation on `put_all` and
-      `put_new_all` is now done with per-key deletes, which do not require
-      chunking.
+      `put_new_all` is now done with per-key deletes.
       """
     ],
     gc_interval: [
