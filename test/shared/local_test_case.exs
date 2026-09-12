@@ -392,6 +392,109 @@ defmodule Nebulex.Adapters.LocalTest do
         assert cache.stream!(in: []) |> Enum.to_list() == []
       end
 
+      test "count_all with query {:in, keys}", %{cache: cache, name: name} do
+        :ok = cache.put_all(a: 1, b: 2, c: 3)
+
+        assert cache.count_all!(in: [:a, :b]) == 2
+        assert cache.count_all!(in: [:a, :b, :unknown]) == 2
+        assert cache.count_all!(in: []) == 0
+
+        _ = new_generation(cache, name)
+
+        :ok = cache.put(:d, 4)
+
+        assert cache.count_all!(in: [:a, :b, :c, :d]) == 4
+      end
+
+      test "count_all and delete_all with query {:in, keys} exclude expired entries", %{
+        cache: cache
+      } do
+        :ok = cache.put_all(a: 1, b: 2)
+        :ok = cache.put_all([c: 3, d: 4], ttl: 100)
+
+        _ = t_sleep(200)
+
+        assert cache.count_all!(in: [:a, :b, :c, :d]) == 2
+        assert cache.delete_all!(in: [:a, :b, :c, :d]) == 2
+      end
+
+      test "queries with {:in, keys} match tagged entries", %{cache: cache} do
+        :ok = cache.put_all([a: 1, b: 2, c: 3], tag: :foo)
+
+        assert cache.get_all!(in: [:a, :b, :c]) |> Enum.sort() == [a: 1, b: 2, c: 3]
+        assert cache.stream!(in: [:a, :b, :c]) |> Enum.sort() == [a: 1, b: 2, c: 3]
+        assert cache.count_all!(in: [:a, :b, :c]) == 3
+        assert cache.delete_all!(in: [:a, :b, :c]) == 3
+        assert cache.count_all!() == 0
+      end
+
+      test "stream with query {:in, keys} (tuple keys)", %{cache: cache} do
+        entries = [{{:a, 1}, 1}, {{:b, {:c, 3}}, 2}]
+
+        :ok = cache.put_all(entries)
+
+        assert cache.stream!(in: [{:a, 1}, {:b, {:c, 3}}]) |> Enum.sort() == Enum.sort(entries)
+      end
+
+      test "queries with {:in, keys} handle reserved match-spec atoms", %{cache: cache} do
+        :ok = cache.put_all(%{:_ => 1, :"$1" => 2, :a => 3, {:_, :x} => 4, %{a: 1} => 5})
+        :ok = cache.put(%{a: 1, b: 2}, 6)
+        :ok = cache.put([:a, :_], 7)
+
+        assert cache.get_all!(in: [:"$1"]) == [{:"$1", 2}]
+        assert cache.count_all!(in: [{:_, :x}]) == 1
+        assert cache.count_all!(in: [[:a, :_]]) == 1
+
+        # Map keys must match exactly (no partial matching)
+        assert cache.get_all!(in: [%{a: 1}]) == [{%{a: 1}, 5}]
+        assert cache.count_all!(in: [%{a: 1}]) == 1
+
+        # `:_` must be treated as a regular key, not as a wildcard
+        assert cache.delete_all!(in: [:_]) == 1
+        assert cache.count_all!() == 6
+      end
+
+      test "queries with {:in, keys} batch reserved match-spec atoms with ordinary keys", %{
+        cache: cache
+      } do
+        :ok = cache.put_all(%{:a => 1, :b => 2, :"$1" => 3, {:_, :x} => 4, %{a: 1} => 5})
+
+        keys = [:a, :b, :"$1", {:_, :x}, %{a: 1}, :unknown]
+
+        expected = Enum.sort([{:a, 1}, {:b, 2}, {:"$1", 3}, {{:_, :x}, 4}, {%{a: 1}, 5}])
+
+        assert cache.get_all!(in: keys) |> Enum.sort() == expected
+        assert cache.stream!(in: keys) |> Enum.sort() == expected
+        assert cache.count_all!(in: keys) == 5
+        assert cache.delete_all!(in: keys) == 5
+        assert cache.count_all!() == 0
+      end
+
+      test "queries with {:in, keys} handle a large number of non-indexable keys", %{
+        cache: cache
+      } do
+        # A single match spec matching all these map keys would exceed the
+        # ETS guard-depth limit (`SystemLimitError` at ~1300 keys); the
+        # adapter must chunk them.
+        keys = for i <- 1..2000, do: %{i: i}
+
+        :ok = cache.put_all(Enum.map(keys, &{&1, 1}))
+
+        assert cache.count_all!(in: keys) == 2000
+        assert cache.stream!([in: keys], max_entries: 2000) |> Enum.count() == 2000
+        assert cache.delete_all!(in: keys) == 2000
+        assert cache.count_all!(in: keys) == 0
+      end
+
+      test "queries with {:in, keys} ignore duplicated keys", %{cache: cache} do
+        :ok = cache.put_all(a: 1, b: 2)
+
+        assert cache.get_all!(in: [:a, :a]) == [a: 1]
+        assert cache.stream!(in: [:a, :a]) |> Enum.to_list() == [a: 1]
+        assert cache.count_all!(in: [:a, :a, :b]) == 2
+        assert cache.delete_all!(in: [:a, :a, :b]) == 2
+      end
+
       test "QueryHelper: get_all with tag", %{cache: cache} do
         assert cache.put_all([a: 1, b: 2, c: 3], tag: :foo) == :ok
         assert cache.put_all([d: 4, e: 5, f: 6], tag: :bar) == :ok
@@ -782,6 +885,71 @@ defmodule Nebulex.Adapters.LocalTest do
 
         assert cache.count_all!() == 21
         assert cache.get_all!(select: :key) |> Enum.sort() == more_keys
+      end
+
+      test "get_all!/2 with {:in, keys} (entries are moved to the newer generation)", %{
+        cache: cache,
+        name: name
+      } do
+        entries = Enum.map(1..10, &{&1, &1})
+        keys = Enum.map(entries, &elem(&1, 0))
+
+        :ok = cache.put_all(entries)
+
+        _ = new_generation(cache, name)
+
+        Enum.each(entries, fn {k, v} ->
+          refute get_from_new(cache, name, k)
+          assert get_from_old(cache, name, k) == v
+        end)
+
+        assert cache.get_all!(in: keys) |> Enum.sort() == entries
+
+        Enum.each(entries, fn {k, v} ->
+          assert get_from_new(cache, name, k) == v
+          refute get_from_old(cache, name, k)
+        end)
+
+        _ = new_generation(cache, name)
+
+        assert cache.get_all!(in: keys) |> Enum.sort() == entries
+      end
+
+      test "get_all!/2 with {:in, keys} (expired entries are removed on read)", %{
+        cache: cache,
+        name: name
+      } do
+        :ok = cache.put(:a, 1)
+        :ok = cache.put(:b, 2, ttl: 100)
+
+        _ = new_generation(cache, name)
+        _ = t_sleep(200)
+
+        assert cache.get_all!(in: [:a, :b]) == [a: 1]
+
+        assert get_from_new(cache, name, :a) == 1
+        refute get_from_new(cache, name, :b)
+        refute get_from_old(cache, name, :b)
+      end
+
+      test "put_all/2 (tagged keys are removed from older generation)", %{
+        cache: cache,
+        name: name
+      } do
+        entries = [a: 1, b: 2]
+
+        :ok = cache.put_all(entries, tag: :foo)
+
+        _ = new_generation(cache, name)
+
+        :ok = cache.put_all(entries, tag: :foo)
+
+        Enum.each(entries, fn {k, v} ->
+          assert get_from_new(cache, name, k) == v
+          refute get_from_old(cache, name, k)
+        end)
+
+        assert cache.count_all!() == 2
       end
     end
 

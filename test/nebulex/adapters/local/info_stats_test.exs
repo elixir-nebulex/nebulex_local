@@ -115,10 +115,13 @@ defmodule Nebulex.Adapters.Local.InfoStatsTest do
 
       _ = t_sleep(1100)
 
-      # The `get_all` doesn't trigger the expiration
+      # The `get_all` triggers the lazy expiration and removes the expired
+      # entries. However, since it is an adapter-internal removal, it is not
+      # reflected in the expiration/deletion stats.
       assert Cache.get_all!(in: [:a, :b, :c, :d]) |> Map.new() == %{a: 1, b: 2}
 
-      # The `get` will trigger the expiration
+      # The expired entries were already removed by `get_all`, hence, the
+      # `get` calls are plain misses (no expirations/deletions counted).
       refute Cache.get!(:c)
       refute Cache.get!(:d)
 
@@ -127,9 +130,9 @@ defmodule Nebulex.Adapters.Local.InfoStatsTest do
                  hits: 6,
                  misses: 4,
                  writes: 4,
-                 evictions: 2,
-                 expirations: 2,
-                 deletions: 2,
+                 evictions: 0,
+                 expirations: 0,
+                 deletions: 0,
                  updates: 0
                }
       end)

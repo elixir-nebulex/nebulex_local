@@ -80,8 +80,9 @@ defmodule Nebulex.Adapters.Local.Options do
       required: false,
       default: 100,
       doc: """
-      This option limits the max nested match specs based on the number of keys
-      when purging the older cache generation.
+      Deprecated: This option is no longer used and will be removed in the
+      next major release. Purging the older generation on `put_all` and
+      `put_new_all` is now done with per-key deletes.
       """
     ],
     gc_interval: [

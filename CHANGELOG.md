@@ -19,6 +19,47 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   write had already stored for the same key; the promotion now uses
   `insert_new`, so the concurrent write wins.
   [#10](https://github.com/elixir-nebulex/nebulex_local/issues/10).
+- [Nebulex.Adapters.Local] Fixed severe performance degradation of `get_all`,
+  `count_all`, `delete_all`, and `stream` with `{:in, keys}` queries. Keys are
+  now bound in the ETS match head (or fetched per key), so ETS uses the key
+  index instead of scanning the whole table per chunk of keys — O(keys)
+  instead of O(table size × keys). The same fix applies to the older
+  generation purge performed by `put_all` and `put_new_all`; consequently,
+  the `:purge_chunk_size` option is now deprecated and ignored.
+  [#8](https://github.com/elixir-nebulex/nebulex_local/issues/8).
+- [Nebulex.Adapters.Local] Fixed a data-loss bug in `{:in, keys}` queries: a
+  key shaped like a match-spec variable (e.g. `:"$1"`) was compared inside
+  the ETS match-spec guard, where it became a self-referential variable
+  (`{:"=:=", :"$1", :"$1"}`, always true) instead of a literal value — so
+  e.g. `delete_all(in: [:"$1"])` deleted every entry in the table rather
+  than the one entry for that key. Keys are now bound directly in the match
+  head, or compared as literal `{:const, key}` terms when that isn't
+  possible (e.g. `:_`, `:"$N"` atoms, maps, structs), so reserved-looking
+  keys are always matched as literal values. `count_all`, `delete_all`, and
+  `stream` batch such non-indexable keys given in one call into chunked
+  table scans (bounded per scan to stay under the ETS match-spec guard
+  limit), instead of scanning once per such key.
+- [Nebulex.Adapters.Local] On `:ordered_set` tables, `{:in, keys}` queries
+  now compare keys with the table's native `==` semantics across `get_all`,
+  `count_all`, `delete_all`, and `stream`, consistent with the single-key
+  commands (e.g., an entry stored under the integer `1` matches the key
+  `1.0`). Previously, `count_all`, `delete_all`, and `stream` compared keys
+  with `=:=` and could disagree with `get_all` — an entry readable via
+  `get_all(in: [1.0])` was not deletable via `delete_all(in: [1.0])`. These
+  operations now look the keys up directly instead of using match specs on
+  this backend type, and `delete_all` lazily removes (without counting)
+  expired entries stored under the given keys.
+- [Nebulex.Adapters.Local] Duplicate keys given to `{:in, keys}` queries are
+  now processed once instead of once per occurrence.
+- [Nebulex.Adapters.Local] `{:in, keys}` queries no longer silently ignore
+  entries written with the `:tag` option, and `stream/2` no longer crashes
+  when the given keys are tuples.
+- [Nebulex.Adapters.Local] `get_all` with `{:in, keys}` now moves entries from
+  the older generation into the newer one and lazily removes expired entries
+  on read (like `fetch/2`), restoring the v2 read behavior. Note: entries
+  removed this way during `get_all` with `{:in, keys}` are not currently
+  reflected in the evictions/expirations/deletions stats counters; fixing
+  that needs a change in Nebulex core, not this adapter.
 
 ## [v3.0.0](https://github.com/elixir-nebulex/nebulex_local/tree/v3.0.0) (2026-02-21)
 > [Full Changelog](https://github.com/elixir-nebulex/nebulex_local/compare/v3.0.0-rc.2...v3.0.0)
