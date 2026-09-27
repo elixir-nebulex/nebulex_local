@@ -27,7 +27,16 @@ defmodule Nebulex.Adapters.Local.Generation do
   blocked.
   """
 
-  # Internal state
+  use GenServer
+
+  import Nebulex.Adapters.Local, only: [with_retry: 1]
+
+  alias Nebulex.Adapter
+  alias Nebulex.Adapters.Common.Info.Stats
+  alias Nebulex.Adapters.Local.{Backend, Metadata, Options}
+  alias Nebulex.Telemetry
+
+  # Internal state.
   defstruct cache: nil,
             name: nil,
             telemetry: nil,
@@ -43,15 +52,6 @@ defmodule Nebulex.Adapters.Local.Generation do
             gc_memory_check_interval: nil,
             gc_healthcheck_ref: nil,
             gc_cleanup_delay: nil
-
-  use GenServer
-
-  alias Nebulex.Adapter
-  alias Nebulex.Adapters.Common.Info.Stats
-  alias Nebulex.Adapters.Local.{Backend, Metadata, Options}
-  alias Nebulex.Telemetry
-
-  import Nebulex.Adapters.Local, only: [with_retry: 1]
 
   @type t() :: %__MODULE__{}
   @type server_ref() :: pid() | atom() | :ets.tid()
@@ -85,7 +85,7 @@ defmodule Nebulex.Adapters.Local.Generation do
   """
   @spec new(server_ref(), opts()) :: [atom()]
   def new(server_ref, opts \\ []) do
-    # Validate options
+    # Validate options.
     opts = Options.validate_gc_runtime_opts!(opts)
 
     do_call(server_ref, {:new_generation, Keyword.fetch!(opts, :gc_interval_reset)})
@@ -203,35 +203,21 @@ defmodule Nebulex.Adapters.Local.Generation do
     |> GenServer.call(:get_state)
   end
 
-  defp do_call(tab, message) do
-    tab
-    |> server()
-    |> GenServer.call(message)
-  end
-
-  defp get_meta_tab(server_ref) when is_atom(server_ref) or is_pid(server_ref) do
-    server_ref
-    |> Adapter.lookup_meta()
-    |> Map.fetch!(:meta_tab)
-  end
-
-  defp get_meta_tab(server_ref), do: server_ref
-
   ## GenServer Callbacks
 
   @impl true
   def init(opts) do
-    # Trap exit signals to run eviction tasks
+    # Trap exit signals to run eviction tasks.
     _ = Process.flag(:trap_exit, true)
 
-    # Get adapter metadata
+    # Get adapter metadata.
     adapter_meta = Keyword.fetch!(opts, :adapter_meta)
 
-    # Add the GC PID to the meta table
+    # Add the GC PID to the meta table.
     meta_tab = Map.fetch!(adapter_meta, :meta_tab)
     :ok = Metadata.put(meta_tab, :gc_pid, self())
 
-    # Initial state
+    # Initial state.
     state =
       struct(
         __MODULE__,
@@ -240,13 +226,13 @@ defmodule Nebulex.Adapters.Local.Generation do
         |> Map.merge(adapter_meta)
       )
 
-    # Create a new generation
+    # Create a new generation.
     :ok = new_gen(state)
 
-    # Timer ref
+    # Timer ref.
     ref = if state.gc_interval, do: start_timer(state.gc_interval)
 
-    # Update state
+    # Update state.
     state = %{state | gc_heartbeat_ref: ref}
 
     {:ok, state, {:continue, :setup_mem_check_interval}}
@@ -261,7 +247,7 @@ defmodule Nebulex.Adapters.Local.Generation do
           gc_memory_check_interval: mem_check_interval
         } = state
       ) do
-    # Init healthcheck timer
+    # Init healthcheck timer.
     healthcheck_ref =
       cond do
         not is_nil(max_size) ->
@@ -297,10 +283,10 @@ defmodule Nebulex.Adapters.Local.Generation do
   end
 
   def handle_call({:new_generation, gc_interval_reset?}, _from, state) do
-    # Create new generation
+    # Create new generation.
     :ok = new_gen(state)
 
-    # Maybe reset heartbeat timer
+    # Maybe reset heartbeat timer.
     heartbeat_ref = maybe_reset_heartbeat(gc_interval_reset?, state)
 
     {:reply, :ok, %{state | gc_heartbeat_ref: heartbeat_ref}}
@@ -335,10 +321,10 @@ defmodule Nebulex.Adapters.Local.Generation do
           gc_heartbeat_ref: heartbeat_ref
         } = state
       ) do
-    # Create new generation
+    # Create new generation.
     :ok = new_gen(state)
 
-    # Reset heartbeat timer
+    # Reset heartbeat timer.
     heartbeat_ref = start_timer(gc_interval, heartbeat_ref)
 
     {:noreply, %{state | gc_heartbeat_ref: heartbeat_ref}}
@@ -370,7 +356,23 @@ defmodule Nebulex.Adapters.Local.Generation do
     {:noreply, state}
   end
 
-  ## Private Functions
+  ## Private functions
+
+  defp do_call(tab, message) do
+    tab
+    |> server()
+    |> GenServer.call(message)
+  end
+
+  defp get_meta_tab(server_ref) when is_atom(server_ref) or is_pid(server_ref) do
+    server_ref
+    |> Adapter.lookup_meta()
+    |> Map.fetch!(:meta_tab)
+  end
+
+  defp get_meta_tab(server_ref) do
+    server_ref
+  end
 
   defp start_timer(time, ref \\ nil, event \\ :heartbeat)
 
@@ -403,31 +405,31 @@ defmodule Nebulex.Adapters.Local.Generation do
          stats_counter: stats_counter,
          gc_cleanup_delay: gc_cleanup_delay
        }) do
-    # Create new generation
+    # Create new generation.
     gen_tab = Backend.new(backend, meta_tab, backend_opts)
 
-    # Update generation list
+    # Update generation list.
     case list(meta_tab) do
       [newer, older] ->
-        # Update generations
+        # Update generations.
         :ok = Metadata.put(meta_tab, :generations, [gen_tab, newer])
 
         # Schedule cleanup of older generation to give grace period for ongoing
-        # operations
+        # operations.
         _ref = Process.send_after(self(), {:cleanup_older_gen, older}, gc_cleanup_delay)
 
-        # Get size of older generation
+        # Get size of older generation.
         size = with_retry(fn -> backend.info(older, :size) end)
 
-        # Since the older generation is deleted, update evictions count
+        # Since the older generation is deleted, update evictions count.
         :ok = Stats.incr(stats_counter, :evictions, size)
 
       [newer] ->
-        # Update generations
+        # Update generations.
         :ok = Metadata.put(meta_tab, :generations, [gen_tab, newer])
 
       [] ->
-        # update generations
+        # Update generations.
         :ok = Metadata.put(meta_tab, :generations, [gen_tab])
     end
   end
@@ -461,26 +463,26 @@ defmodule Nebulex.Adapters.Local.Generation do
        ) do
     case eviction_info(info, state) do
       {size, max_size} when size >= max_size ->
-        # Create a new generation
+        # Create a new generation.
         :ok = new_gen(state)
 
-        # Delete expired entries
+        # Delete expired entries.
         _ = cache.delete_all(name, [query: :expired], [])
 
-        # Reset the heartbeat timer
+        # Reset the heartbeat timer.
         heartbeat_ref = start_timer(gc_interval, heartbeat_ref)
 
-        # Since the eviction has already been done, recalculate the info
+        # Since the eviction has already been done, recalculate the info.
         {size, max_size} = eviction_info(info, state)
 
-        # Reset the healthcheck timer
+        # Reset the healthcheck timer.
         healthcheck_ref =
           eval_mem_check_interval(info, size, max_size, healthcheck_ref, mem_check_interval)
 
         {true, %{state | gc_heartbeat_ref: heartbeat_ref, gc_healthcheck_ref: healthcheck_ref}}
 
       {size, max_size} ->
-        # Reset the healthcheck timer
+        # Reset the healthcheck timer.
         healthcheck_ref =
           eval_mem_check_interval(info, size, max_size, healthcheck_ref, mem_check_interval)
 

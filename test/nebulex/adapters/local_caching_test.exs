@@ -1,5 +1,11 @@
 defmodule Nebulex.Adapters.LocalCachingTest do
   use ExUnit.Case, async: true
+  use Nebulex.Adapters.Local.QueryHelper
+  use Nebulex.Caching, cache: __MODULE__.Cache
+
+  import Nebulex.CacheCase
+
+  ## Internals
 
   defmodule Cache do
     @moduledoc false
@@ -7,11 +13,6 @@ defmodule Nebulex.Adapters.LocalCachingTest do
       otp_app: :nebulex_local,
       adapter: Nebulex.Adapters.Local
   end
-
-  use Nebulex.Caching, cache: Cache
-  use Nebulex.Adapters.Local.QueryHelper
-
-  import Nebulex.CacheCase
 
   ## Tests
 
@@ -244,36 +245,42 @@ defmodule Nebulex.Adapters.LocalCachingTest do
   @decorate cacheable(key: email, references: &(&1 && &1.id))
   def get_user_by_email(email) do
     user_id = email_to_user_id(email)
+
     %{id: user_id, name: user_name(user_id)}
   end
 
   @decorate cache_put(key: id, opts: [tag: :user_scores])
   def set_user_score(id, score) do
     _ = id
+
     score
   end
 
   @decorate cache_put(key: id, match: &match_ok/1, opts: [tag: :important])
   def put_important_data(id) do
     _ = id
+
     {:ok, "important"}
   end
 
   @decorate cache_put(key: id, match: &match_ok/1, opts: [tag: :temporary])
   def put_temp_data(id) do
     _ = id
+
     {:ok, "temporary"}
   end
 
   @decorate cache_put(key: key, opts: [tag: :sessions])
   def put_session_data(key, value) do
     _ = key
+
     value
   end
 
   @decorate cache_put(key: id)
   def put_score(id, score) do
     _ = id
+
     score
   end
 
@@ -295,6 +302,7 @@ defmodule Nebulex.Adapters.LocalCachingTest do
   @decorate cache_evict(query: &evict_user_references_query/1)
   def evict_user_references(user_id) do
     _ = user_id
+
     :ok
   end
 
@@ -314,6 +322,7 @@ defmodule Nebulex.Adapters.LocalCachingTest do
 
   defp evict_user_references_query(ctx) do
     [user_id] = ctx.args
+
     keyref_match_spec(user_id)
   end
 

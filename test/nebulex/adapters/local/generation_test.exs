@@ -1,6 +1,14 @@
 defmodule Nebulex.Adapters.Local.GenerationTest do
   use ExUnit.Case, async: true
 
+  import Nebulex.CacheCase
+
+  alias Nebulex.Adapters.Local.Generation
+  alias Nebulex.Adapters.Local.GenerationTest.LocalWithSizeLimit
+  alias Nebulex.Adapters.Local.TestCache, as: Cache
+
+  ## Internals
+
   defmodule LocalWithSizeLimit do
     @moduledoc false
     use Nebulex.Cache,
@@ -8,11 +16,7 @@ defmodule Nebulex.Adapters.Local.GenerationTest do
       adapter: Nebulex.Adapters.Local
   end
 
-  import Nebulex.CacheCase
-
-  alias Nebulex.Adapters.Local.Generation
-  alias Nebulex.Adapters.Local.GenerationTest.LocalWithSizeLimit
-  alias Nebulex.Adapters.Local.TestCache, as: Cache
+  ## Tests
 
   describe "init" do
     test "ok: with default options" do
@@ -183,7 +187,7 @@ defmodule Nebulex.Adapters.Local.GenerationTest do
         {mem_size, _} = Generation.memory_info(LocalWithSizeLimit)
         :ok = Generation.realloc(LocalWithSizeLimit, mem_size * 2)
 
-        # Trigger the healthcheck event
+        # Trigger the healthcheck event.
         :ok = check_cache_size(LocalWithSizeLimit, 1000)
 
         assert generations_len(LocalWithSizeLimit) == 1
@@ -191,9 +195,11 @@ defmodule Nebulex.Adapters.Local.GenerationTest do
 
         :ok = flood_cache(mem_size, mem_size * 2)
 
-        # Wait until the mem is less than the max (healthcheck has run many times)
+        # Wait until the memory is less than the max (the healthcheck has run
+        # many times).
         wait_until(fn ->
           assert generations_len(LocalWithSizeLimit) == 2
+
           assert_mem_size(:<=)
         end)
 
@@ -201,6 +207,7 @@ defmodule Nebulex.Adapters.Local.GenerationTest do
 
         wait_until(fn ->
           assert generations_len(LocalWithSizeLimit) == 2
+
           assert_mem_size(:>)
         end)
 
@@ -208,14 +215,16 @@ defmodule Nebulex.Adapters.Local.GenerationTest do
 
         wait_until(fn ->
           assert generations_len(LocalWithSizeLimit) == 2
+
           assert_mem_size(:>)
         end)
 
-        # Trigger the healthcheck event
+        # Trigger the healthcheck event.
         :ok = Enum.each(1..3, fn _ -> check_cache_size(LocalWithSizeLimit) end)
 
         wait_until(fn ->
           assert generations_len(LocalWithSizeLimit) == 2
+
           assert_mem_size(:<=)
         end)
 
@@ -259,59 +268,59 @@ defmodule Nebulex.Adapters.Local.GenerationTest do
             backend: unquote(backend)
           )
 
-        # Initially there should be only 1 generation and no entries
+        # Initially there should be only 1 generation and no entries.
         assert generations_len(LocalWithSizeLimit) == 1
         assert LocalWithSizeLimit.count_all!() == 0
 
-        # Put some entries to exceed the max size
+        # Put some entries to exceed the max size.
         _ = cache_put(LocalWithSizeLimit, 1..4)
 
-        # Validate current size
+        # Validate current size.
         assert LocalWithSizeLimit.count_all!() == 4
 
-        # Wait the max healthcheck timeout
+        # Wait the max healthcheck timeout.
         :ok = Process.sleep(1600)
 
-        # There should be 2 generation now
+        # There should be 2 generation now.
         assert generations_len(LocalWithSizeLimit) == 2
 
-        # The entries should be now in the older generation
+        # The entries should be now in the older generation.
         assert LocalWithSizeLimit.count_all!() == 4
 
-        # Wait the min healthcheck timeout since max size is exceeded
+        # Wait the min healthcheck timeout since max size is exceeded.
         :ok = Process.sleep(1100)
 
-        # Cache should be empty now
+        # Cache should be empty now.
         assert LocalWithSizeLimit.count_all!() == 0
 
-        # Put some entries without exceeding the max size
+        # Put some entries without exceeding the max size.
         _ = cache_put(LocalWithSizeLimit, 5..6)
 
-        # Validate current size
+        # Validate current size.
         assert LocalWithSizeLimit.count_all!() == 2
 
-        # Wait the max healthcheck timeout
+        # Wait the max healthcheck timeout.
         :ok = Process.sleep(1600)
 
-        # The entries should be in the newer generation yet
+        # The entries should be in the newer generation yet.
         assert LocalWithSizeLimit.count_all!() == 2
 
-        # Put some entries to exceed the max size
+        # Put some entries to exceed the max size.
         _ = cache_put(LocalWithSizeLimit, 7..8)
 
-        # Wait the max healthcheck timeout
+        # Wait the max healthcheck timeout.
         :ok = Process.sleep(1600)
 
-        # The entries should be in the newer generation yet
+        # The entries should be in the newer generation yet.
         assert LocalWithSizeLimit.count_all!() == 4
 
-        # Wait the min healthcheck timeout since max size is exceeded
+        # Wait the min healthcheck timeout since max size is exceeded.
         :ok = Process.sleep(1100)
 
-        # Cache should be empty now
+        # Cache should be empty now.
         assert LocalWithSizeLimit.count_all!() == 0
 
-        # Stop the cache
+        # Stop the cache.
         :ok = LocalWithSizeLimit.stop()
       end
 
@@ -323,16 +332,16 @@ defmodule Nebulex.Adapters.Local.GenerationTest do
             backend: unquote(backend)
           )
 
-        # Put some entries to exceed the max size
+        # Put some entries to exceed the max size.
         _ = cache_put(LocalWithSizeLimit, 1..4)
 
-        # Wait the max healthcheck timeout
+        # Wait the max healthcheck timeout.
         :ok = Process.sleep(1600)
 
-        # Assert not crashed
+        # Assert not crashed.
         assert LocalWithSizeLimit.count_all!() == 4
 
-        # Stop the cache
+        # Stop the cache.
         :ok = LocalWithSizeLimit.stop()
       end
     end

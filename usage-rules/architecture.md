@@ -98,7 +98,8 @@ lib/
 |---|---|
 | `Nebulex.Adapter` | Required — `init/1`, adapter lifecycle |
 | `Nebulex.Adapter.KV` | `fetch`, `put`, `delete`, `take`, `has_key?`, `ttl`, `expire`, `put_all`, `get_all` |
-| `Nebulex.Adapter.Queryable` | `get_all`, `count_all`, `delete_all` via ETS match specs |
+| `Nebulex.Adapter.CompositeKV` | `get_and_update`, `update`, `fetch_or_store`, `get_or_store` (default implementation from Nebulex) |
+| `Nebulex.Adapter.Queryable` | `get_all`, `count_all`, `delete_all`, `stream` via ETS match specs; `{:in, keys}` queries use per-key `lookup`/`take` on every table type and backend |
 | `Nebulex.Adapter.Transaction` | Optimistic locking via `Nebulex.Locks` |
 | `Nebulex.Adapter.Observable` | Cache entry events via `Nebulex.Streams` (optional) |
 | `Nebulex.Adapter.Info` | Stats counters (hits, misses, evictions, etc.) |

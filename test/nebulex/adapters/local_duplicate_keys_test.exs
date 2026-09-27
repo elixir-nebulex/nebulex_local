@@ -1,6 +1,13 @@
 defmodule Nebulex.Adapters.LocalDuplicateKeysTest do
   use ExUnit.Case, async: true
 
+  import Ex2ms
+  import Nebulex.CacheCase, only: [t_sleep: 1]
+
+  alias Nebulex.Adapters.LocalDuplicateKeysTest.{ETS, Shards}
+
+  ## Internals
+
   defmodule ETS do
     use Nebulex.Cache,
       otp_app: :nebulex_local,
@@ -13,9 +20,7 @@ defmodule Nebulex.Adapters.LocalDuplicateKeysTest do
       adapter: Nebulex.Adapters.Local
   end
 
-  import Ex2ms
-
-  alias Nebulex.Adapters.LocalDuplicateKeysTest.{ETS, Shards}
+  ## Tests
 
   setup do
     {:ok, ets} = ETS.start_link(backend_type: :duplicate_bag)
@@ -25,6 +30,7 @@ defmodule Nebulex.Adapters.LocalDuplicateKeysTest do
       :ok = Process.sleep(100)
 
       if Process.alive?(ets), do: ETS.stop()
+
       if Process.alive?(shards), do: Shards.stop()
     end)
 
@@ -71,6 +77,7 @@ defmodule Nebulex.Adapters.LocalDuplicateKeysTest do
 
         assert cache.get!(:a) == [1, 2, 2]
         assert cache.delete!(:a) == :ok
+
         refute cache.get!(:a)
       end)
     end
@@ -91,6 +98,7 @@ defmodule Nebulex.Adapters.LocalDuplicateKeysTest do
         :ok = cache.put(:a, 2)
 
         assert cache.has_key?(:a) == {:ok, true}
+
         assert cache.has_key?(:b) == {:ok, false}
       end)
     end
@@ -116,6 +124,39 @@ defmodule Nebulex.Adapters.LocalDuplicateKeysTest do
 
         assert cache.count_all!() == 6
         assert cache.delete_all!() == 6
+
+        assert cache.count_all!() == 0
+      end)
+    end
+
+    test "count_all, delete_all and stream with {:in, keys}", %{caches: caches} do
+      for_all_caches(caches, fn cache ->
+        :ok = cache.put_all(a: 1, a: 2, a: 2, b: 1, b: 2, c: 1)
+
+        assert cache.count_all!(in: [:a, :b]) == 5
+        assert cache.stream!(in: [:a]) |> Enum.sort() == [a: 1, a: 2, a: 2]
+        assert cache.delete_all!(in: [:a, :b]) == 5
+
+        assert cache.count_all!() == 1
+      end)
+    end
+
+    test "count_all, delete_all and stream with {:in, keys} skip expired objects", %{
+      caches: caches
+    } do
+      for_all_caches(caches, fn cache ->
+        :ok = cache.put(:a, 1, ttl: 100)
+        :ok = cache.put_all(a: 2, a: 3, b: 1)
+      end)
+
+      _ = t_sleep(200)
+
+      for_all_caches(caches, fn cache ->
+        assert cache.count_all!(in: [:a, :b]) == 3
+        assert cache.stream!(in: [:a]) |> Enum.sort() == [a: 2, a: 3]
+        assert cache.delete_all!(in: [:a, :b]) == 3
+
+        # The expired object under `:a` is removed too.
         assert cache.count_all!() == 0
       end)
     end
@@ -133,6 +174,7 @@ defmodule Nebulex.Adapters.LocalDuplicateKeysTest do
         res_query = cache.get_all!(query: test_ms, select: :key) |> Enum.sort()
 
         assert res_stream == [:a, :a, :b]
+
         assert res_query == res_stream
       end)
     end

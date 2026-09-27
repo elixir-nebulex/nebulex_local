@@ -6,6 +6,8 @@ defmodule Nebulex.Adapters.Local.InfoTest do
   alias Nebulex.Adapter
   alias Nebulex.Adapters.Common.Info.Stats
 
+  @empty_stats Stats.new()
+
   ## Internals
 
   defmodule Cache do
@@ -14,8 +16,6 @@ defmodule Nebulex.Adapters.Local.InfoTest do
       otp_app: :nebulex_local,
       adapter: Nebulex.Adapters.Local
   end
-
-  @empty_stats Stats.new()
 
   ## Tests
 

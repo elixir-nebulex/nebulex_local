@@ -2,15 +2,15 @@ defmodule Nebulex.Adapters.LocalEtsTest do
   use ExUnit.Case, async: true
 
   # Inherit tests
-  use Nebulex.Adapters.LocalTest
   use Nebulex.Adapters.Local.CacheTestCase
+  use Nebulex.Adapters.LocalTest
 
   import Nebulex.CacheCase, only: [setup_with_dynamic_cache: 3, t_sleep: 1]
 
   alias Nebulex.Adapter
   alias Nebulex.Adapters.Local.TestCache, as: Cache
 
-  setup_with_dynamic_cache Cache, :local_with_ets, purge_chunk_size: 10
+  setup_with_dynamic_cache Cache, :local_with_ets, []
 
   describe "ets" do
     test "backend", %{name: name} do

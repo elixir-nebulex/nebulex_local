@@ -1,10 +1,8 @@
 # Mocks
-[
-  Mix.Project,
-  Nebulex.Cache.Registry,
-  Nebulex.Time
-]
-|> Enum.each(&Mimic.copy/1)
+Enum.each(
+  [Mix.Project, Nebulex.Cache.Registry, Nebulex.Time, Nebulex.Adapters.Local.Metadata],
+  &Mimic.copy/1
+)
 
 # Nebulex dependency path
 nbx_dep_path = Mix.Project.deps_paths()[:nebulex]

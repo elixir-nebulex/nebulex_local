@@ -167,7 +167,10 @@
         {Credo.Check.Readability.SeparateAliasRequire, false},
         {Credo.Check.Readability.SinglePipe, false},
         {Credo.Check.Readability.Specs, false},
-        {Credo.Check.Readability.StrictModuleLayout, false},
+        {Credo.Check.Readability.StrictModuleLayout,
+         order: ~w/shortdoc moduledoc behaviour use import require alias module_attribute
+                   defstruct opaque type typep callback macrocallback optional_callbacks/a,
+         ignore_module_attributes: ~w/decorate/a},
         {Credo.Check.Readability.WithCustomTaggedTuple, false},
         {Credo.Check.Refactor.ABCSize, false},
         {Credo.Check.Refactor.AppendSingleItem, false},

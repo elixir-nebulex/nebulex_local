@@ -140,14 +140,14 @@ defmodule Nebulex.Locks do
 
   use GenServer
 
+  import Record
+
   alias Nebulex.Locks.Options
   alias Nebulex.Time
 
-  import Record
-
   ## Internals
 
-  # Lock Entry
+  # Lock Entry.
   defrecord(:lock,
     key: nil,
     owner: nil,
@@ -155,7 +155,7 @@ defmodule Nebulex.Locks do
     timeout: nil
   )
 
-  # Internal state
+  # Internal state.
   defstruct table: nil, cleanup_interval: nil, cleanup_batch_size: nil
 
   ## API
@@ -292,17 +292,17 @@ defmodule Nebulex.Locks do
     cleanup_batch_size = Keyword.fetch!(opts, :cleanup_batch_size)
     init_callback = Keyword.get(opts, :init_callback)
 
-    # Initialize the locks table
+    # Initialize the locks table.
     table = init_table(name)
 
-    # Invoke the init callback if provided
+    # Invoke the init callback if provided.
     if init_callback do
       {m, f, a} = init_callback
 
       apply(m, f, [table | a])
     end
 
-    # Create the initial state
+    # Create the initial state.
     state = %__MODULE__{
       table: table,
       cleanup_interval: cleanup_interval,
@@ -314,7 +314,7 @@ defmodule Nebulex.Locks do
 
   @impl true
   def handle_continue(:setup_cleanup, %__MODULE__{cleanup_interval: cleanup_interval} = state) do
-    # Schedule first cleanup
+    # Schedule first cleanup.
     Process.send_after(self(), :cleanup, cleanup_interval)
 
     {:noreply, state}
@@ -336,15 +336,15 @@ defmodule Nebulex.Locks do
       ) do
     cleanup_stale_locks(table, cleanup_batch_size)
 
-    # Schedule next cleanup
+    # Schedule next cleanup.
     Process.send_after(self(), :cleanup, cleanup_interval)
 
     {:noreply, state}
   end
 
-  ## Helpers
+  ## Private functions
 
-  # Initialize a new locks ETS table
+  # Initialize a new locks ETS table.
   defp init_table(nil) do
     :ets.new(:locks_table, [
       :set,
@@ -366,18 +366,18 @@ defmodule Nebulex.Locks do
     ])
   end
 
-  # Build and sort lock keys to prevent deadlocks
+  # Build and sort lock keys to prevent deadlocks.
   defp build_lock_keys([]) do
-    # Global lock when no keys specified
+    # Global lock when no keys specified.
     [:__global_lock__]
   end
 
   defp build_lock_keys(keys) do
-    # Sort keys deterministically to prevent deadlocks
+    # Sort keys deterministically to prevent deadlocks.
     Enum.sort(keys)
   end
 
-  # Retry logic for lock acquisition
+  # Retry logic for lock acquisition.
   defp do_acquire(_table, _lock_keys, 0, _retry_interval, _lock_timeout, _attempt) do
     {:error, :timeout}
   end
@@ -403,24 +403,24 @@ defmodule Nebulex.Locks do
     end
   end
 
-  # Try to acquire all locks atomically (all-or-nothing)
+  # Try to acquire all locks atomically (all-or-nothing).
   defp try_acquire_all(table, keys, timeout) do
     now = Time.now()
     owner = self()
 
-    # Build all lock records upfront
+    # Build all lock records upfront.
     locks = Enum.map(keys, &lock(key: &1, owner: owner, timestamp: now, timeout: timeout))
 
-    # Fast path: try to insert all locks at once (O(1))
+    # Fast path: try to insert all locks at once (O(1)).
     with :error <- insert_new(table, locks),
-         # Slow path: check for stale locks with early termination
+         # Slow path: check for stale locks with early termination.
          :ok <- cleanup_stale_locks(table, keys, now) do
-      # Stale locks were cleaned, retry batch insert (inner retry)
+      # Stale locks were cleaned, retry batch insert (inner retry).
       insert_new(table, locks)
     end
   end
 
-  # Insert new lock records atomically
+  # Insert new lock records atomically.
   defp insert_new(table, lock_records) do
     case :ets.insert_new(table, lock_records) do
       true -> :ok
@@ -428,11 +428,11 @@ defmodule Nebulex.Locks do
     end
   end
 
-  # Check all keys for stale locks with early termination on valid lock
+  # Check all keys for stale locks with early termination on valid lock.
   defp cleanup_stale_locks(table, lock_keys, now) do
     with stale_keys when is_list(stale_keys) <-
            Enum.reduce_while(lock_keys, [], &check_stale_key(&1, &2, table, now)) do
-      # Delete all stale locks (could be empty if locks were released)
+      # Delete all stale locks (could be empty if locks were released).
       Enum.each(stale_keys, &:ets.delete(table, &1))
     end
   end
@@ -443,30 +443,30 @@ defmodule Nebulex.Locks do
       # the batch insert attempt but is released before we check it during
       # stale lock detection. Difficult to test deterministically without
       # introducing flaky tests.
-      # coveralls-ignore-start
+      # coveralls-ignore-start.
       [] ->
-        # No lock exists, continue checking
+        # No lock exists, continue checking.
         {:cont, stale_acc}
 
       # coveralls-ignore-stop
 
       [lock(key: ^lock_key, owner: pid, timestamp: timestamp, timeout: timeout)] ->
         if stale_lock?(pid, timestamp, now, timeout) do
-          # Stale lock found, mark for cleanup and continue
+          # Stale lock found, mark for cleanup and continue.
           {:cont, [lock_key | stale_acc]}
         else
-          # Valid lock found, stop immediately
+          # Valid lock found, stop immediately.
           {:halt, :error}
         end
     end
   end
 
-  # Check if a lock is stale (dead process or timed out)
+  # Check if a lock is stale (dead process or timed out).
   defp stale_lock?(pid, timestamp, now, lock_timeout) do
     !Process.alive?(pid) or now - timestamp > lock_timeout
   end
 
-  # Sleep with custom interval (function-based, no jitter)
+  # Sleep with custom interval (function-based, no jitter).
   defp sleep_with_jitter(interval_fun, attempt) when is_function(interval_fun, 1) do
     case interval_fun.(attempt) do
       interval when is_integer(interval) and interval >= 0 ->
@@ -478,7 +478,7 @@ defmodule Nebulex.Locks do
     end
   end
 
-  # Sleep with random jitter to prevent thundering herd (fixed interval)
+  # Sleep with random jitter to prevent thundering herd (fixed interval).
   defp sleep_with_jitter(0, _attempt) do
     :ok
   end
@@ -490,28 +490,29 @@ defmodule Nebulex.Locks do
     Process.sleep(sleep_time)
   end
 
-  # Cleanup stale locks from the table
+  # Cleanup stale locks from the table.
   defp cleanup_stale_locks(table, cleanup_batch_size) do
     now = Time.now()
 
-    # Fix the table to prevent inconsistencies during cleanup
+    # Fix the table to prevent inconsistencies during cleanup.
     :ets.safe_fixtable(table, true)
 
-    # Select locks in batches using continuation
+    # Select locks in batches using continuation.
     case :ets.select(table, [{:"$1", [], [:"$1"]}], cleanup_batch_size) do
       :"$end_of_table" ->
         :ok
 
       {locks, continuation} ->
         cleanup_batch(table, locks, now)
+
         cleanup_with_continuation(table, continuation, now)
     end
   after
-    # Unfix the table
+    # Unfix the table.
     :ets.safe_fixtable(table, false)
   end
 
-  # Cleanup locks using continuation
+  # Cleanup locks using continuation.
   defp cleanup_with_continuation(_table, :"$end_of_table", _now) do
     :ok
   end
@@ -523,11 +524,12 @@ defmodule Nebulex.Locks do
 
       {locks, next_continuation} ->
         cleanup_batch(table, locks, now)
+
         cleanup_with_continuation(table, next_continuation, now)
     end
   end
 
-  # Cleanup a batch of locks
+  # Cleanup a batch of locks.
   defp cleanup_batch(table, locks, now) do
     Enum.each(locks, fn lock(key: key, owner: pid, timestamp: ts, timeout: timeout) ->
       if stale_lock?(pid, ts, now, timeout) do

@@ -78,7 +78,7 @@ defmodule Nebulex.Adapters.Local.Options do
     purge_chunk_size: [
       type: :pos_integer,
       required: false,
-      default: 100,
+      deprecated: "It is ignored and will be removed in the next major release.",
       doc: """
       Deprecated: This option is no longer used and will be removed in the
       next major release. Purging the older generation on `put_all` and

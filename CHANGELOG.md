@@ -6,6 +6,15 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## Unreleased
 
+### Enhancements
+
+- [Nebulex.Adapters.Local] `delete_all` with `{:in, keys}` now also removes
+  the expired entries stored under the given keys (lazy expiration), without
+  counting them. Before, they stayed in the table until the garbage
+  collector dropped their generation. As with `get_all`, these removals are
+  not reflected in the stats counters.
+  [#8](https://github.com/elixir-nebulex/nebulex_local/issues/8).
+
 ### Bug fixes
 
 - [Nebulex.Adapters.Local] Fixed two race conditions in the promotion of
@@ -20,46 +29,82 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `insert_new`, so the concurrent write wins.
   [#10](https://github.com/elixir-nebulex/nebulex_local/issues/10).
 - [Nebulex.Adapters.Local] Fixed severe performance degradation of `get_all`,
-  `count_all`, `delete_all`, and `stream` with `{:in, keys}` queries. Keys are
-  now bound in the ETS match head (or fetched per key), so ETS uses the key
-  index instead of scanning the whole table per chunk of keys — O(keys)
-  instead of O(table size × keys). The same fix applies to the older
-  generation purge performed by `put_all` and `put_new_all`; consequently,
-  the `:purge_chunk_size` option is now deprecated and ignored.
-  [#8](https://github.com/elixir-nebulex/nebulex_local/issues/8).
+  `count_all`, `delete_all`, and `stream` with `{:in, keys}` queries, on
+  every table type and backend. Keys are now looked up one by one through
+  the table's key index instead of being matched by scanning the whole table
+  per chunk of keys — O(keys) instead of O(table size × keys). The same fix
+  applies to the older generation purge performed by `put_all` and
+  `put_new_all`.
+  [#8](https://github.com/elixir-nebulex/nebulex_local/issues/8)
+  ([theoneandonlywoj](https://github.com/theoneandonlywoj)).
 - [Nebulex.Adapters.Local] Fixed a data-loss bug in `{:in, keys}` queries: a
   key shaped like a match-spec variable (e.g. `:"$1"`) was compared inside
   the ETS match-spec guard, where it became a self-referential variable
   (`{:"=:=", :"$1", :"$1"}`, always true) instead of a literal value — so
   e.g. `delete_all(in: [:"$1"])` deleted every entry in the table rather
-  than the one entry for that key. Keys are now bound directly in the match
-  head, or compared as literal `{:const, key}` terms when that isn't
-  possible (e.g. `:_`, `:"$N"` atoms, maps, structs), so reserved-looking
-  keys are always matched as literal values. `count_all`, `delete_all`, and
-  `stream` batch such non-indexable keys given in one call into chunked
-  table scans (bounded per scan to stay under the ETS match-spec guard
-  limit), instead of scanning once per such key.
-- [Nebulex.Adapters.Local] On `:ordered_set` tables, `{:in, keys}` queries
-  now compare keys with the table's native `==` semantics across `get_all`,
-  `count_all`, `delete_all`, and `stream`, consistent with the single-key
-  commands (e.g., an entry stored under the integer `1` matches the key
-  `1.0`). Previously, `count_all`, `delete_all`, and `stream` compared keys
-  with `=:=` and could disagree with `get_all` — an entry readable via
-  `get_all(in: [1.0])` was not deletable via `delete_all(in: [1.0])`. These
-  operations now look the keys up directly instead of using match specs on
-  this backend type, and `delete_all` lazily removes (without counting)
-  expired entries stored under the given keys.
-- [Nebulex.Adapters.Local] Duplicate keys given to `{:in, keys}` queries are
-  now processed once instead of once per occurrence.
-- [Nebulex.Adapters.Local] `{:in, keys}` queries no longer silently ignore
-  entries written with the `:tag` option, and `stream/2` no longer crashes
-  when the given keys are tuples.
+  than the one entry for that key. Keys are no longer spliced into match
+  specs at all, so any term (including `:_`, `:"$N"` atoms, maps, and
+  structs) is matched as a literal key.
+  [#8](https://github.com/elixir-nebulex/nebulex_local/issues/8)
+  ([theoneandonlywoj](https://github.com/theoneandonlywoj)).
+- [Nebulex.Adapters.Local] `{:in, keys}` queries now compare keys with the
+  table's native key equality across `get_all`, `count_all`, `delete_all`,
+  and `stream`, consistent with the single-key commands: `=:=` on `:set`,
+  `:bag`, and `:duplicate_bag` tables and `==` on `:ordered_set` tables
+  (e.g., an entry stored under the integer `1` matches the key `1.0`).
+  Previously, `count_all`, `delete_all`, and `stream` compared keys with
+  `=:=` on every table type and could disagree with `get_all` on
+  `:ordered_set` — an entry readable via `get_all(in: [1.0])` was not
+  deletable via `delete_all(in: [1.0])`.
+  [#8](https://github.com/elixir-nebulex/nebulex_local/issues/8)
+  ([theoneandonlywoj](https://github.com/theoneandonlywoj)).
 - [Nebulex.Adapters.Local] `get_all` with `{:in, keys}` now moves entries from
   the older generation into the newer one and lazily removes expired entries
   on read (like `fetch/2`), restoring the v2 read behavior. Note: entries
-  removed this way during `get_all` with `{:in, keys}` are not currently
-  reflected in the evictions/expirations/deletions stats counters; fixing
-  that needs a change in Nebulex core, not this adapter.
+  removed this way are not currently reflected in the
+  evictions/expirations/deletions stats counters; fixing that needs a change
+  in Nebulex core, not this adapter.
+  [#8](https://github.com/elixir-nebulex/nebulex_local/issues/8)
+  ([theoneandonlywoj](https://github.com/theoneandonlywoj)).
+- [Nebulex.Adapters.Local] `{:in, keys}` queries now process duplicate keys
+  once instead of once per occurrence. On `:set` and `:ordered_set` tables,
+  they also return or count each stored entry once, even when a concurrent
+  read is promoting it and the entry is transiently present in both
+  generations.
+  [#8](https://github.com/elixir-nebulex/nebulex_local/issues/8)
+  ([theoneandonlywoj](https://github.com/theoneandonlywoj)).
+- [Nebulex.Adapters.Local] `{:in, keys}` queries no longer silently ignore
+  entries written with the `:tag` option, and `stream/2` no longer crashes
+  when the given keys are tuples.
+  [#8](https://github.com/elixir-nebulex/nebulex_local/issues/8)
+  ([theoneandonlywoj](https://github.com/theoneandonlywoj)).
+- [Nebulex.Adapters.Local] `delete_all` with `{:in, keys}` no longer fails or
+  undercounts when the garbage collector deletes the older generation while
+  the call runs, and `stream` with `{:in, keys}` retries a chunk of keys
+  when a generation is deleted while the stream is consumed.
+  [#8](https://github.com/elixir-nebulex/nebulex_local/issues/8).
+- [Nebulex.Adapters.Local] The automatic retry for generation tables deleted
+  by the garbage collector now also recognizes the `{:unknown_table, tab}`
+  error raised by the `:shards` backend. Before, it only handled the ETS
+  error, so on `:shards` the affected commands failed instead of retrying.
+  [#13](https://github.com/elixir-nebulex/nebulex_local/pull/13).
+
+### Deprecations
+
+- [Nebulex.Adapters.Local] The `:purge_chunk_size` option is deprecated. The
+  older generation purge no longer works in chunks, so the option has no
+  effect; passing it emits a deprecation warning when the cache starts.
+  [#8](https://github.com/elixir-nebulex/nebulex_local/issues/8).
+
+### Backwards incompatible changes
+
+- [Nebulex.Adapters.Local] The adapter now implements
+  `Nebulex.Adapter.CompositeKV`, which Nebulex core requires from every
+  adapter, so it needs Nebulex v3.1.0 or later. The composite commands
+  (`get_and_update`, `update`, `fetch_or_store`, and `get_or_store`) use the
+  default implementation from Nebulex, so `get_and_update` now stores `nil`
+  when the given function returns it, the same as the other adapters.
+  [#13](https://github.com/elixir-nebulex/nebulex_local/pull/13).
 
 ## [v3.0.0](https://github.com/elixir-nebulex/nebulex_local/tree/v3.0.0) (2026-02-21)
 > [Full Changelog](https://github.com/elixir-nebulex/nebulex_local/compare/v3.0.0-rc.2...v3.0.0)

@@ -154,7 +154,9 @@ defmodule NebulexAdaptersLocal.MixProject do
       # The file to write usage rules into (required for usage_rules syncing)
       file: "AGENTS.md",
 
-      # rules to include directly in AGENTS.md
+      # Rules referenced from AGENTS.md via markdown links into deps/.
+      # Keeps AGENTS.md compact and lets contributors read the canonical
+      # rules from the nebulex / usage_rules deps without inlined drift.
       usage_rules: [
         {:nebulex,
          [
@@ -163,9 +165,10 @@ defmodule NebulexAdaptersLocal.MixProject do
              "nebulex",
              "elixir-style",
              "elixir"
-           ]
+           ],
+           link: :at
          ]},
-        :otp
+        {:usage_rules, [sub_rules: ["otp"], link: :at]}
       ],
 
       # Agent skills configuration

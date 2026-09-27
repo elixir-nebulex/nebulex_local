@@ -163,8 +163,8 @@ defmodule Nebulex.Adapters.Local.QueryHelperTest do
       assert_raise ArgumentError, ~r/Invalid field\(s\): \[:invalid\]/, fn ->
         Code.eval_quoted(
           quote do
-            require Nebulex.Adapters.Local.QueryHelper
             import Nebulex.Adapters.Local.QueryHelper
+            require Nebulex.Adapters.Local.QueryHelper
 
             match_spec invalid: x, select: x
           end
@@ -218,7 +218,7 @@ defmodule Nebulex.Adapters.Local.QueryHelperTest do
     test "selects entries with value guard", %{table: table} do
       ms = match_spec key: k, value: v, where: is_integer(v) and v > 100, select: {k, v}
 
-      assert :ets.select(table, ms) |> Enum.sort() == [{5, 200}, {{:key, 6}, 300}] |> Enum.sort()
+      assert :ets.select(table, ms) |> Enum.sort() == [{5, 200}, {{:key, 6}, 300}]
     end
 
     test "selects entries with exp guard", %{table: table} do
@@ -274,7 +274,7 @@ defmodule Nebulex.Adapters.Local.QueryHelperTest do
       ms = match_spec key: k, value: v, select: k
       result = :ets.select(table, ms)
 
-      assert Enum.sort(result) |> Enum.sort() == [1, 2, 3, 4, 5, {:key, 6}] |> Enum.sort()
+      assert Enum.sort(result) == [1, 2, 3, 4, 5, {:key, 6}]
     end
 
     test "matches with only specific field binding", %{table: table} do
