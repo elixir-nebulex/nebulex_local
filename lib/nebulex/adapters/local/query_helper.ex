@@ -190,14 +190,14 @@ if Code.ensure_loaded?(Ex2ms) do
     - The `:select` clause is optional and defaults to `true`.
     """
     defmacro match_spec(opts) do
-      # Separate field bindings from where/select clauses
+      # Separate field bindings from where/select clauses.
       {select, opts} = Keyword.pop(opts, :select, true)
       {where, field_bindings} = Keyword.pop(opts, :where)
 
-      # Build the ETS tuple from field bindings
+      # Build the ETS tuple from field bindings.
       entry_pattern = build_entry_tuple(field_bindings)
 
-      # Build the clause for Ex2ms
+      # Build the clause for Ex2ms.
       clause =
         if where do
           quote do
@@ -209,42 +209,12 @@ if Code.ensure_loaded?(Ex2ms) do
           end
         end
 
-      # Generate the Ex2ms fun (Ex2ms should be imported by the caller)
+      # Generate the Ex2ms fun (Ex2ms should be imported by the caller).
       quote do
         Ex2ms.fun do
           unquote(clause)
         end
       end
-    end
-
-    # Build the ETS tuple {:entry, key, value, touched, exp, tag} from user bindings
-    defp build_entry_tuple(fields) do
-      # Convert keyword list to map for easier lookup
-      field_map = Map.new(fields)
-
-      # Validate that only valid fields are provided
-      valid_fields = [:key, :value, :touched, :exp, :tag]
-      invalid_fields = Map.keys(field_map) -- valid_fields
-
-      unless Enum.empty?(invalid_fields) do
-        raise ArgumentError, """
-        Invalid field(s): #{inspect(invalid_fields)}
-
-        Valid fields are: #{inspect(valid_fields)}
-        """
-      end
-
-      # Define the order of fields in the entry record
-      # {:entry, key, value, touched, exp, tag}
-      ordered_fields = [:key, :value, :touched, :exp, :tag]
-
-      # Build the tuple elements
-      elements = [
-        :entry | Enum.map(ordered_fields, &Map.get(field_map, &1, {:_, [], Elixir}))
-      ]
-
-      # Return as a tuple AST node
-      {:{}, [], elements}
     end
 
     @doc """
@@ -301,9 +271,10 @@ if Code.ensure_loaded?(Ex2ms) do
     def keyref_match_spec(referenced_key, opts \\ []) do
       {cache_filter, _opts} = Keyword.pop(opts, :cache)
 
-      # Always return the reference key (the cache key that points to the referenced key)
+      # Always return the reference key (the cache key that points to the
+      # referenced key).
       # This works for get_all (returns the keys), and the adapter overrides it for
-      # delete_all/count_all to return true as needed
+      # delete_all/count_all to return true as needed.
       if cache_filter do
         fun do
           {:entry, k, {:"$nbx_keyref_spec", c, ref_k, _t}, _, _, _}
@@ -317,6 +288,39 @@ if Code.ensure_loaded?(Ex2ms) do
             k
         end
       end
+    end
+
+    ## Private functions
+
+    # Build the ETS tuple `{:entry, key, value, touched, exp, tag}` from the
+    # user bindings.
+    defp build_entry_tuple(fields) do
+      # Convert keyword list to map for easier lookup.
+      field_map = Map.new(fields)
+
+      # Validate that only valid fields are provided.
+      valid_fields = [:key, :value, :touched, :exp, :tag]
+      invalid_fields = Map.keys(field_map) -- valid_fields
+
+      unless Enum.empty?(invalid_fields) do
+        raise ArgumentError, """
+        Invalid field(s): #{inspect(invalid_fields)}
+
+        Valid fields are: #{inspect(valid_fields)}
+        """
+      end
+
+      # The order of the fields in the entry record:
+      # `{:entry, key, value, touched, exp, tag}`.
+      ordered_fields = [:key, :value, :touched, :exp, :tag]
+
+      # Build the tuple elements.
+      elements = [
+        :entry | Enum.map(ordered_fields, &Map.get(field_map, &1, {:_, [], Elixir}))
+      ]
+
+      # Return as a tuple AST node.
+      {:{}, [], elements}
     end
   end
 end

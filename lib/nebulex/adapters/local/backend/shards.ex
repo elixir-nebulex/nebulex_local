@@ -2,6 +2,12 @@ if Code.ensure_loaded?(:shards) do
   defmodule Nebulex.Adapters.Local.Backend.Shards do
     @moduledoc false
 
+    use Nebulex.Adapters.Local.Backend
+
+    alias Nebulex.Adapters.Local.Metadata
+
+    ## Internals
+
     defmodule __MODULE__.DynamicSupervisor do
       @moduledoc false
       use DynamicSupervisor
@@ -25,10 +31,6 @@ if Code.ensure_loaded?(:shards) do
       end
     end
 
-    use Nebulex.Adapters.Local.Backend
-
-    alias Nebulex.Adapters.Local.Metadata
-
     ## API
 
     @doc false
@@ -40,12 +42,11 @@ if Code.ensure_loaded?(:shards) do
         |> Keyword.fetch!(:adapter_meta)
         |> Map.fetch!(:meta_tab)
 
-      [
+      sup_spec([
         {__MODULE__.DynamicSupervisor, meta_tab},
         locks_spec(opts),
         generation_spec(opts, partitions: partitions)
-      ]
-      |> sup_spec()
+      ])
     end
 
     @doc false
@@ -72,6 +73,8 @@ if Code.ensure_loaded?(:shards) do
 
       {:ok, pid, tab}
     end
+
+    ## Private functions
 
     defp table_spec(opts) do
       %{

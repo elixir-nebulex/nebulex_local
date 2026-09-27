@@ -1,16 +1,18 @@
 defmodule Nebulex.Adapters.Local.InfoStatsTest do
   use ExUnit.Case, async: true
 
+  import Nebulex.CacheCase
+
+  alias Nebulex.Adapters.Common.Info.Stats
+
+  ## Internals
+
   defmodule Cache do
     @moduledoc false
     use Nebulex.Cache,
       otp_app: :nebulex_local,
       adapter: Nebulex.Adapters.Local
   end
-
-  import Nebulex.CacheCase
-
-  alias Nebulex.Adapters.Common.Info.Stats
 
   ## Tests
 

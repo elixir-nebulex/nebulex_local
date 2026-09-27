@@ -2,8 +2,8 @@ defmodule Nebulex.Adapters.LocalWithShardsTest do
   use ExUnit.Case, async: true
 
   # Inherit tests
-  use Nebulex.Adapters.LocalTest
   use Nebulex.Adapters.Local.CacheTestCase
+  use Nebulex.Adapters.LocalTest
 
   import Nebulex.CacheCase, only: [setup_with_dynamic_cache: 3]
 

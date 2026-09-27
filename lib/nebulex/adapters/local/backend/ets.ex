@@ -6,11 +6,10 @@ defmodule Nebulex.Adapters.Local.Backend.ETS do
 
   @doc false
   def child_spec(opts) do
-    [
+    sup_spec([
       locks_spec(opts),
       generation_spec(opts)
-    ]
-    |> sup_spec()
+    ])
   end
 
   @doc false
