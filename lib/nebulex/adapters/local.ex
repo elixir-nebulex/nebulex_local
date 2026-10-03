@@ -817,6 +817,9 @@ defmodule Nebulex.Adapters.Local do
   @behaviour Nebulex.Adapter.Queryable
   @behaviour Nebulex.Adapter.Transaction
 
+  # Inherit default composite KV implementation
+  use Nebulex.Adapter.CompositeKV
+
   # Inherit default info implementation
   use Nebulex.Adapters.Common.Info
 

@@ -73,11 +73,14 @@ defmodule NebulexAdaptersLocal.MixProject do
     ]
   end
 
+  # The adapter implements `Nebulex.Adapter.CompositeKV`, which the Hex
+  # release of Nebulex (3.0.x) does not ship yet. Depend on Nebulex `main`
+  # until v3.1.0 is published, then switch back to `{:nebulex, "~> 3.1"}`.
   defp nebulex_dep do
     if path = System.get_env("NEBULEX_PATH") do
       {:nebulex, path: path}
     else
-      {:nebulex, "~> 3.0"}
+      {:nebulex, github: "elixir-nebulex/nebulex", branch: "main"}
     end
   end
 
