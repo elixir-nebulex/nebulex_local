@@ -1,137 +1,53 @@
 # Architecture
 
-This guide explains why `nebulex_local` exists, how it is structured
-internally, and the non-negotiable rules that govern every contribution.
-Read this before making any significant change to the codebase.
+This guide covers what the code and the module docs do not: how the modules
+split responsibility and the non-negotiable rules for every change. Read the
+"Non-Negotiables" section at session start; read the rest before structural
+changes.
 
-For the broader Nebulex ecosystem context — the adapter pattern, behaviour
-contracts, and shared non-negotiables — read the
-[core Nebulex architecture guide][core-arch] first.
+For how the adapter works and how to configure it, read the module docs:
+
+- `Nebulex.Adapters.Local` - generational caching, the retry on tables
+  deleted by the GC, the `:ttl` option, eviction, and queries.
+- `Nebulex.Adapters.Local.Generation` - the generation manager and the GC.
+- `Nebulex.Adapters.Local.QueryHelper` - the match-spec builder.
+
+For the broader Nebulex context (the adapter pattern, behaviour contracts,
+and shared non-negotiables), read the
+[core Nebulex architecture guide][core-arch].
 
 [core-arch]: https://hexdocs.pm/nebulex/architecture.html
 
 ---
 
-## Why This Package Exists
+## Purpose
 
 The core `nebulex` package defines the caching abstraction but ships no
-production cache implementation. `nebulex_local` provides the local in-memory
-layer: a generational ETS-based cache designed for single-node, high-throughput
-scenarios.
-
-It is the foundation most Nebulex topologies build on — the Partitioned,
-Replicated, and Coherent adapters in `nebulex_distributed` all use
-`nebulex_local` as their per-node primary storage.
+production cache. `nebulex_local` is the local in-memory layer: a
+generational ETS-based cache for single-node, high-throughput use. The
+Partitioned, Replicated, and Coherent adapters in `nebulex_distributed` use
+it as their per-node storage, so a regression here affects every topology
+built on it.
 
 ---
 
-## How It Works — Generational Caching
+## Module Boundaries
 
-The core mechanism is **generational garbage collection**, inspired by
-[epocxy cache](https://github.com/duomark/epocxy/blob/master/src/cxy_cache.erl).
+The per-file map lives in the "Local Key Files" section of `AGENTS.md`.
+This section covers only how the modules split responsibility:
 
-Instead of expiring individual entries with timers, the adapter maintains
-**two ETS table generations** (`:new` and `:old`):
-
-```ascii
-  Write        Read (hit in new)    Read (hit in old)
-    |                 |                    |
-    v                 v                    v
-+--------+       +--------+          +--------+
-|  new   |<------|  new   |          |  new   |<-- migrated
-+--------+       +--------+          +--------+
-|  old   |       |  old   |  miss -> |  old   |
-+--------+       +--------+          +--------+
-```
-
-- Writes always go to the `:new` generation.
-- Reads check `:new` first, then `:old`. A hit in `:old` **migrates** the
-  entry to `:new` (keeping hot data alive).
-- When the GC runs (on `:gc_interval` timeout or memory threshold), a new
-  generation is created and the oldest is deleted — no per-entry timer needed.
-
-This design makes TTL-based expiration approximate: entries expire somewhere
-between one and two GC intervals after their TTL elapses.
-
----
-
-## Module Structure
-
-```ascii
-lib/
-+-- nebulex/
-    +-- adapters/
-    |   +-- local.ex              # Main adapter — public API + behaviour impl
-    |   +-- local/
-    |       +-- generation.ex     # GC manager (GenServer) — owns ETS tables
-    |       +-- metadata.ex       # ETS metadata table (generation refs, stats)
-    |       +-- backend.ex        # Backend behaviour (ETS vs Shards)
-    |       +-- backend/
-    |       |   +-- ets.ex        # Default ETS backend
-    |       |   +-- shards.ex     # Shards backend (partitioned ETS)
-    |       +-- options.ex        # NimbleOptions schema for all config
-    |       +-- query_helper.ex   # Match spec builder DSL for queries
-    +-- locks.ex                  # ETS-based locking for transactions
-    +-- locks/
-        +-- options.ex            # NimbleOptions schema for lock options
-```
-
-### Key modules
-
-| Module | Responsibility |
-|---|---|
-| `Nebulex.Adapters.Local` | Adapter entry point — implements all behaviours, delegates to generation/backend |
-| Nebulex.Adapters.Local.Generation | GenServer managing GC lifecycle and ETS table rotation |
-| Nebulex.Adapters.Local.Metadata | ETS metadata table holding current generation references and stats counters |
-| Nebulex.Adapters.Local.Backend | Behaviour defining the ETS/Shards abstraction |
-| Nebulex.Adapters.Local.Backend.ETS | Default single-table ETS backend |
-| Nebulex.Adapters.Local.Backend.Shards | Partitioned ETS backend via `:shards` (optional dep) |
-| `Nebulex.Adapters.Local.QueryHelper` | DSL for building ETS match specs for `get_all/delete_all` queries |
-| `Nebulex.Adapters.Local.Options` | NimbleOptions schema — all adapter config validated here |
-| `Nebulex.Locks` | Lightweight ETS-based locking for transaction support |
-
----
-
-## Implemented Behaviours
-
-| Behaviour | Purpose |
-|---|---|
-| `Nebulex.Adapter` | Required — `init/1`, adapter lifecycle |
-| `Nebulex.Adapter.KV` | `fetch`, `put`, `delete`, `take`, `has_key?`, `ttl`, `expire`, `put_all`, `get_all` |
-| `Nebulex.Adapter.CompositeKV` | `get_and_update`, `update`, `fetch_or_store`, `get_or_store` (default implementation from Nebulex) |
-| `Nebulex.Adapter.Queryable` | `get_all`, `count_all`, `delete_all`, `stream` via ETS match specs; `{:in, keys}` queries use per-key `lookup`/`take` on every table type and backend |
-| `Nebulex.Adapter.Transaction` | Optimistic locking via `Nebulex.Locks` |
-| `Nebulex.Adapter.Observable` | Cache entry events via `Nebulex.Streams` (optional) |
-| `Nebulex.Adapter.Info` | Stats counters (hits, misses, evictions, etc.) |
-
----
-
-## Optional Dependencies
-
-| Dep | Purpose | Default |
-|---|---|---|
-| `:shards` | Partitioned ETS backend for high-concurrency workloads | No |
-| `:ex2ms` | Elixir-friendly match spec builder (used by QueryHelper) | No |
-| `:telemetry` | Telemetry span events for cache operations | No |
-
-The adapter works without any of these. Shards support is activated by
-setting `backend: :shards` in config.
-
----
-
-## Running Tests
-
-```bash
-# With local nebulex core checkout (recommended during development)
-NEBULEX_PATH=nebulex mix test
-
-# Against published nebulex package
-mix test
-```
-
-Both ETS and Shards backends are tested by separate test files:
-- `test/nebulex/adapters/local_ets_test.exs` — default ETS backend
-- `test/nebulex/adapters/local_shards_test.exs` — Shards backend
+- `Nebulex.Adapters.Local` is the adapter entry point. It implements the
+  behaviours and delegates the table lifecycle to `Generation`.
+- `Generation` is the GenServer that owns the generation tables and runs
+  the GC (table rotation); it creates and deletes tables through
+  `Backend`. `Metadata` holds the current generation references and the
+  stats counters.
+- `Backend` defines the ETS/`:shards` abstraction; `Backend.ETS` and
+  `Backend.Shards` implement it (see Non-Negotiable #2).
+- `QueryHelper` builds match specs for queries. `Options` and
+  `Locks.Options` hold the NimbleOptions schemas; all config is validated
+  there.
+- `Nebulex.Locks` provides the ETS-based locks that back transactions.
 
 ---
 
@@ -152,7 +68,8 @@ operations are subtle — do not remove or weaken the retry logic in
 
 `Backend.ETS` and `Backend.Shards` must implement the same behaviour
 contract. A feature or fix applied to one must be applied to the other.
-Tests for both backends must pass before any PR is merged.
+Tests for both backends (`local_ets_test.exs` and `local_shards_test.exs`)
+must pass before any PR is merged.
 
 ### 3. Optional deps must remain optional
 
@@ -162,22 +79,32 @@ adapter may raise or fail when these deps are absent. Use
 
 ### 4. Keep this document up to date
 
-After any structural change — adding or removing modules, changing implemented
-behaviours, adding optional dependencies, or modifying the GC/backend
-boundaries — review this document and update it if needed. A stale architecture
-guide is worse than no guide.
+After any structural change — changing the module boundaries, adding an
+optional dependency, or adding a non-negotiable —
+review this document and update it if needed. When you add, move, or
+remove a file, update the "Local Key Files" list in `AGENTS.md`. Do not
+copy here what the module docs already say; link to them. A stale
+architecture guide is worse than no guide.
 
 ### 5. `mix test.ci` must pass
 
 ```bash
-mix test.ci
+NEBULEX_PATH=nebulex mix test.ci
 ```
 
 ### 6. `mix docs` must produce no warnings
 
 ```bash
-mix docs
+mix docs --warnings-as-errors
 ```
+
+### 7. Read why before changing subtle behavior
+
+The reasons behind the subtle behavior (the promotion order, the retry on
+deleted tables, and the per-key `{:in, keys}` lookups) are in the module docs,
+the code comments, and the tests. Read them, and the history (`git log -S`),
+before changing that code. Do not reverse such behavior without a test that
+covers the original problem.
 
 ---
 

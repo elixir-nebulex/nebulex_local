@@ -6,9 +6,11 @@ imported Nebulex sections reference missing `usage-rules/*.md` paths or
 Nebulex-core files, treat them as upstream guidance and prioritize this
 repository's local files and modules.
 
-Read `usage-rules/architecture.md` first. It covers why this package exists,
-how generational caching works, the module structure, the implemented
-behaviours, and the non-negotiable contribution rules.
+Read `usage-rules/architecture.md` first (imported below). It covers the
+module boundaries and the non-negotiable contribution rules. For how the adapter works, read the
+module docs it links to.
+
+@usage-rules/architecture.md
 
 ### Running Tests
 
@@ -30,15 +32,19 @@ To run against another checkout, point `NEBULEX_PATH` at it.
 
 ### Local Rule Precedence (for this repo)
 
-When rules conflict, apply them in this order. Items 2–5 refer to the
+When rules conflict, apply them in this order. Items 3–6 refer to the
 rule files referenced via `@deps/…` at the bottom of this file; load
-them as part of session bootstrap.
+them as part of session bootstrap if your agent does not follow `@`
+imports.
 
 1. This local preface.
-2. `nebulex:workflow`.
-3. `nebulex:nebulex` (as framework guidance).
-4. `nebulex:elixir-style` and `nebulex:elixir`.
-5. `usage_rules` and `usage_rules:otp`.
+2. `usage-rules/architecture.md` (this repo's architecture and
+   non-negotiables; it replaces the core architecture guide that
+   `nebulex:workflow` refers to).
+3. `nebulex:workflow`.
+4. `nebulex:nebulex` (as framework guidance).
+5. `nebulex:elixir-style` and `nebulex:elixir`.
+6. `usage_rules` and `usage_rules:otp`.
 
 ### Style Rules Are Non-Negotiable
 
@@ -72,7 +78,7 @@ attention to these rules, which are easy to miss:
 - `lib/nebulex/adapters/local/query_helper.ex` - SQL-like match-spec builder and `keyref_match_spec/2`.
 - `lib/nebulex/locks.ex` - ETS-based local locks used by transactions.
 - `lib/nebulex/locks/options.ex` - `Nebulex.Locks` option definitions and docs.
-- `usage-rules/architecture.md` - Architecture, non-negotiables, and source-of-truth hierarchy.
+- `usage-rules/architecture.md` - Module boundaries and non-negotiables.
 - `test/shared/local_test_case.exs` - Adapter-specific shared suite (`deftests`), run on both backends.
 - `test/shared/cache_test_cache.exs` - Pulls in the generic Nebulex shared cache suites.
 - `test/support/test_cache.exs` - Test cache module used by the shared suites.
