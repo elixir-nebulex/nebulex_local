@@ -86,10 +86,10 @@ remove a file, update the "Local Key Files" list in `AGENTS.md`. Do not
 copy here what the module docs already say; link to them. A stale
 architecture guide is worse than no guide.
 
-### 5. `mix test.ci` must pass
+### 5. `mix precommit` must pass
 
 ```bash
-NEBULEX_PATH=nebulex mix test.ci
+NEBULEX_PATH=nebulex mix precommit
 ```
 
 ### 6. `mix docs` must produce no warnings
