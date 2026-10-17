@@ -1,39 +1,35 @@
 defmodule Nebulex.Adapters.Local do
   @moduledoc """
-  A Local Generation Cache adapter for Nebulex; inspired by
+  A generational, in-memory cache adapter for Nebulex, inspired by
   [epocxy cache](https://github.com/duomark/epocxy/blob/master/src/cxy_cache.erl).
 
-  Generational caching using an ETS table (or multiple ones when used with
-  `:shards`) for each generation of cached data. Accesses hit the newer
-  generation first, and migrate from the older generation to the newer
-  generation when retrieved from the stale table. When a new generation
-  is started, the oldest one is deleted. This is a form of mass garbage
-  collection which avoids using timers and expiration of individual
-  cached elements.
+  The adapter keeps up to two active generations, newer and older. Each
+  generation uses one ETS table, or several tables with the `:shards` backend.
 
-  This implementation of generation cache uses only two generations, referred
-  to as the `new` and the `old` generation.
+  Fetches check the newer generation first. When an unexpired entry is found
+  in the older generation, the adapter moves it into the newer one. When a new generation
+  is created, the newer generation becomes the older one, and the previous
+  older generation is retired; its tables are deleted after
+  `:gc_cleanup_delay`. This evicts entries in groups, without a timer per
+  entry.
 
-  See `Nebulex.Adapters.Local.Generation` to learn more about generation
+  See `Nebulex.Adapters.Local.Generation` for details on generation
   management and garbage collection.
 
-  ## Overall features
+  ## Features
 
-    * Configurable backend (`ets` or `:shards`).
-    * Expiration - A status based on TTL (Time To Live) option. To maintain
-      cache performance, expired entries may not be immediately removed or
-      evicted, they are expired or evicted on-demand, when the key is read.
-    * Eviction - Generational Garbage Collection
-      (see `Nebulex.Adapters.Local.Generation`).
-    * Sharding - For intensive workloads, the Cache may also be partitioned
-      (by using `:shards` backend and specifying the `:partitions` option).
-    * Support for transactions via `Nebulex.Locks`, a lightweight ETS-based
-      locking mechanism optimized for single-node scenarios. Provides atomic
-      lock acquisition, deadlock prevention, and automatic stale lock cleanup.
-      See `Nebulex.Locks` and `Nebulex.Adapter.Transaction`.
-    * Support for stats.
-    * Automatic retry logic for handling race conditions during garbage
-      collection (see [Concurrency and resilience](#module-concurrency-and-resilience)).
+    * Configurable backend (`:ets` or `:shards`).
+    * Expiration through the `:ttl` option. Fetches exclude expired entries
+      (see [The `:ttl` option](#module-the-ttl-option)).
+    * Eviction by generational garbage collection (see
+      `Nebulex.Adapters.Local.Generation`).
+    * Sharding for intensive workloads, with the `:shards` backend and the
+      `:partitions` option.
+    * Transactions through `Nebulex.Locks`, which keeps the locks in ETS on
+      the local node. See `Nebulex.Adapter.Transaction`.
+    * Stats.
+    * Retries when the garbage collector deletes a generation table during an
+      operation (see [Concurrency and resilience](#module-concurrency-and-resilience)).
 
   ## Concurrency and resilience
 
@@ -48,10 +44,10 @@ defmodule Nebulex.Adapters.Local do
   lazily while the stream is consumed; streams with `{:in, keys}` retry each
   chunk of keys.
 
-  The `:gc_cleanup_delay` option (10 seconds by default) makes these retries
-  rare. When a new generation is created, the oldest one is removed from the
-  active generations at once, but its tables are deleted only after the delay,
-  so operations already using them have time to finish. The delay does not
+  The `:gc_cleanup_delay` option (10 seconds by default) gives in-flight
+  operations time to finish before their tables are deleted. When a new
+  generation is created, the oldest one is removed from the active generations
+  at once, but its tables are deleted only after the delay. The delay does not
   keep the retired entries available to new operations.
 
   ## Configuration options
@@ -62,8 +58,7 @@ defmodule Nebulex.Adapters.Local do
 
   ## Usage
 
-  `Nebulex.Cache` is the wrapper around the cache. We can define a
-  local cache as follows:
+  Define a cache module:
 
       defmodule MyApp.LocalCache do
         use Nebulex.Cache,
@@ -71,8 +66,8 @@ defmodule Nebulex.Adapters.Local do
           adapter: Nebulex.Adapters.Local
       end
 
-  Where the configuration for the cache must be in your application
-  environment, usually defined in your `config/config.exs`:
+  Configure the cache in your application environment, usually in
+  `config/config.exs`:
 
       config :my_app, MyApp.LocalCache,
         gc_interval: :timer.hours(12),
@@ -80,10 +75,9 @@ defmodule Nebulex.Adapters.Local do
         allocated_memory: 2_000_000_000,
         gc_memory_check_interval: :timer.seconds(10)
 
-  For intensive workloads, the Cache may also be partitioned using `:shards`
-  as cache backend (`backend: :shards`) and configuring the desired number of
-  partitions via the `:partitions` option. Defaults to
-  `System.schedulers_online()`.
+  For intensive workloads, use the `:shards` backend to partition the cache
+  across several ETS tables. Set the number of partitions with `:partitions`
+  (defaults to `System.schedulers_online()`):
 
       config :my_app, MyApp.LocalCache,
         backend: :shards,
@@ -93,32 +87,32 @@ defmodule Nebulex.Adapters.Local do
         gc_memory_check_interval: :timer.seconds(10),
         partitions: System.schedulers_online() * 2
 
-  If your application was generated with a supervisor (by passing `--sup`
-  to `mix new`) you will have a `lib/my_app/application.ex` file containing
-  the application start callback that defines and starts your supervisor.
-  You just need to edit the `start/2` function to start the cache as a
-  supervisor on your application's supervisor:
+  Add the cache to your application's supervision tree, usually in
+  `lib/my_app/application.ex`:
 
       def start(_type, _args) do
         children = [
-          {MyApp.LocalCache, []},
-          ...
+          MyApp.LocalCache
         ]
+
+        opts = [strategy: :one_for_one, name: MyApp.Supervisor]
+
+        Supervisor.start_link(children, opts)
+      end
 
   See `Nebulex.Cache` for more information.
 
   ## The `:ttl` option
 
-  The `:ttl` option sets an entry's expiration time. Reads check it and treat
-  an expired entry as missing, removing it from the cache. No timer removes
-  the entry when its TTL ends, so the TTL is not an eviction mechanism;
+  The `:ttl` option sets an entry's expiration time. Fetches check this time
+  and exclude expired entries. Expiration does not schedule a timer to remove
+  an entry when its TTL ends, so the TTL is not an eviction mechanism;
   configure the GC options for that. See the
-  ["Eviction policy"](#module-eviction-policy) section.
+  ["Eviction policy"](#module-eviction-policy) section. Custom match-spec
+  queries need their own expiration conditions.
 
   Generation rotation can evict an entry before its TTL ends, so a TTL does
-  not guarantee that an entry stays cached that long. An entry that is not
-  read rarely survives more than two `:gc_interval` periods, so a much longer
-  TTL may never take effect.
+  not guarantee that an entry stays cached that long.
 
   ## Eviction policy
 
@@ -134,7 +128,7 @@ defmodule Nebulex.Adapters.Local do
       periods, depending on when it was written.
 
     * When a size or memory check finds that `:max_size` or
-      `:allocated_memory` is exceeded. The checks run every
+      `:allocated_memory` is reached or exceeded. The checks run every
       `:gc_memory_check_interval` when either option is set, and can evict
       entries sooner than the periodic rotation.
 
@@ -142,8 +136,10 @@ defmodule Nebulex.Adapters.Local do
 
   Set `:gc_interval` to control how often the cache rotates generations.
   Shorter intervals evict unread entries sooner; longer intervals keep them
-  longer. For example, with `gc_interval: :timer.hours(12)`, an entry that is
-  never read is evicted within 12 to 24 hours.
+  longer. For example, with `gc_interval: :timer.hours(12)` and periodic
+  rotation alone, an entry written once and never fetched is evicted after
+  roughly 12 to 24 hours. Expiration or additional rotations can make it
+  unavailable sooner.
 
   Set `:max_size`, `:allocated_memory`, or both to trigger extra rotations
   when the cache reaches that size. Choose the values from the expected number
@@ -156,15 +152,13 @@ defmodule Nebulex.Adapters.Local do
 
   ## Queryable API
 
-  Since the adapter implementation uses ETS tables underneath, the query must be
-  a valid [**ETS Match Spec**](https://www.erlang.org/doc/man/ets#match_spec).
-  To query specific keys, use `{:in, keys}` instead (see the `{:in, keys}`
-  queries section below).
+  Use ETS match specifications to query entry fields, or `{:in, keys}` to look
+  up specific keys (see ["`{:in, keys}` queries"](#module-in-keys-queries)).
+  The adapter also accepts `query: :expired` to select expired entries.
 
-  The adapter defines an entry as a tuple `{:entry, key, value, touched, exp, tag}`,
-  meaning the match pattern within the ETS Match Spec must be like
-  `{:entry, :"$1", :"$2", :"$3", :"$4", :"$5"}`. To make query building easier,
-  you can use the `Ex2ms` library.
+  Entries are stored as `{:entry, key, value, touched, exp, tag}` tuples, and
+  match specifications use this structure. You can write them directly or
+  build them with `Ex2ms` or `Nebulex.Adapters.Local.QueryHelper`.
 
       # Using raw ETS match spec
       iex> match_spec = [
@@ -185,15 +179,13 @@ defmodule Nebulex.Adapters.Local do
       iex> MyCache.get_all(query: match_spec)
       {:ok, [b: 2, c: 3]}
 
-  > You can use the `Ex2ms` or `MatchSpec` library to build queries easier.
-
   ### `{:in, keys}` queries
 
-  Queries with `{:in, keys}` (e.g., `MyCache.get_all(in: keys)`) look each
-  key up directly through the table's key index, one lookup per key and per
-  generation, so their cost is proportional to the number of given keys
-  (`O(keys)`) rather than the cache size. Any term is a valid key. Duplicated
-  keys in the list are processed only once. Bear in mind:
+  Queries with `{:in, keys}` (e.g., `MyCache.get_all(in: keys)`) look up the
+  requested keys directly through the table's key index, avoiding a
+  full-table scan. Lookup cost depends on the table type and the number of
+  entries stored under each key. Any term is a valid key, and duplicate keys
+  in the input are processed only once. Bear in mind:
 
     * `get_all` behaves like `fetch/2` on each key: if an entry is found in
       the older generation, it is moved into the newer one, and expired
@@ -211,286 +203,52 @@ defmodule Nebulex.Adapters.Local do
       keys alias it or when it is transiently present in both generations
       while a concurrent read promotes it.
 
-  ## Building Match Specs with QueryHelper
+  ## Building match specs with QueryHelper
 
-  The `Nebulex.Adapters.Local.QueryHelper` module provides a user-friendly,
-  SQL-like syntax for building ETS match specifications without needing to know
-  the internal entry tuple structure. This is especially useful when working
-  with the local adapter's queryable API.
-
-  ### Why use QueryHelper?
-
-  When building match specs manually, you need to know that entries are stored
-  as `{:entry, key, value, touched, exp, tag}` tuples. QueryHelper abstracts
-  this away, letting you work with named field bindings instead:
-
-      # Without QueryHelper - you need to know the exact tuple structure
-      import Ex2ms
-      match_spec = fun do
-        {:entry, k, v, _, _, _} when k == :foo -> v
-      end
-
-      # With QueryHelper - clean, declarative syntax
-      use Nebulex.Adapters.Local.QueryHelper
-      match_spec = match_spec key: k, value: v, where: k == :foo, select: v
-
-  ### Getting started
-
-  Use `Nebulex.Adapters.Local.QueryHelper` in your module to enable the
-  `match_spec/1` macro and `Ex2ms` support:
-
-      defmodule MyCache.Queries do
-        use Nebulex.Adapters.Local.QueryHelper
-
-        def by_key(key) do
-          match_spec key: k, value: v, where: k == key, select: v
-        end
-
-        def by_tag(tag) do
-          match_spec tag: t, where: t == tag, select: true
-        end
-
-        def expensive_keys do
-          match_spec key: k, value: v, where: is_integer(v) and v > 100, select: k
-        end
-      end
-
-  ### Syntax
-
-  The `match_spec/1` macro accepts a keyword list with:
-
-    * **Field bindings** - `:key`, `:value`, `:touched`, `:exp`, `:tag` - Bind
-      entry fields to variables. Fields not mentioned are automatically
-      wildcarded.
-    * **`:where`** - Optional guard clause with conditions (supports all ETS
-      guard functions).
-    * **`:select`** - Optional return expression specifying what to return
-      (defaults to `true`).
-
-  ### Examples
-
-      # Match all entries where value is greater than 10
-      match_spec value: v, where: v > 10, select: v
-
-      # Match entries with a specific tag
-      match_spec key: k, tag: t, where: t == :important, select: k
-
-      # Complex guards with multiple conditions
-      match_spec key: k, value: v, exp: e,
-                 where: is_integer(v) and e != :infinity,
-                 select: {k, v, e}
-
-      # Match without guards (all entries)
-      match_spec key: k, value: v, select: {k, v}
-
-      # Return entire entry
-      match_spec key: k, tag: t, where: t == :session, select: :"$_"
-
-      # Query only specific fields
-      match_spec tag: t, where: t == :cache_group, select: true
-
-  ### Using with cache operations
-
-  QueryHelper match specs work seamlessly with all queryable operations:
+  `Nebulex.Adapters.Local.QueryHelper` builds ETS match specs from named
+  fields (`:key`, `:value`, `:touched`, `:exp`, and `:tag`), so you do not
+  need to write the internal entry tuple yourself. It requires the optional
+  `:ex2ms` dependency.
 
       use Nebulex.Adapters.Local.QueryHelper
 
-      # Get all values where key is an integer greater than 10
+      # Get the values of the entries whose key is an integer greater than 10
       ms = match_spec key: k, value: v, where: is_integer(k) and k > 10, select: v
       MyCache.get_all!(query: ms)
 
-      # Count entries with a specific tag
-      ms = match_spec tag: t, where: t == :user_session, select: true
-      MyCache.count_all!(query: ms)
-
-      # Delete expired entries (exp is not :infinity and less than now)
-      now = System.system_time(:millisecond)
-      ms = match_spec exp: e, where: e != :infinity and e < now, select: true
-      MyCache.delete_all!(query: ms)
-
-      # Stream entries in batches
-      ms = match_spec value: v, where: is_binary(v), select: v
-      MyCache.stream!(query: ms) |> Enum.take(100)
-
-  ### Practical examples
-
-  Here are some common patterns using QueryHelper:
-
-      defmodule MyApp.CacheQueries do
-        use Nebulex.Adapters.Local.QueryHelper
-
-        # Find all entries for a specific user
-        def user_entries(user_id) do
-          match_spec tag: t, where: t == {:user, user_id}, select: :"$_"
-        end
-
-        # Find entries expiring soon (within next hour)
-        def expiring_soon do
-          cutoff = System.system_time(:millisecond) + :timer.hours(1)
-          match_spec exp: e, where: e != :infinity and e < cutoff, select: true
-        end
-
-        # Get all cached integers
-        def integer_values do
-          match_spec value: v, where: is_integer(v), select: v
-        end
-
-        # Complex filtering with multiple conditions
-        def recent_tagged_entries(tag, min_time) do
-          match_spec key: k,
-                     value: v,
-                     tag: t,
-                     touched: ts,
-                     where: t == tag and ts > min_time,
-                     select: {k, v}
-        end
-      end
-
-      # Use in your application
-      MyApp.Cache.get_all!(query: MyApp.CacheQueries.user_entries(123))
-      MyApp.Cache.delete_all!(query: MyApp.CacheQueries.expiring_soon())
-
-  ### Working with cache references
-
-  When using the `:references` option with `Nebulex.Caching` decorators (like
-  `@decorate cacheable/3`), Nebulex creates reference entries to track
-  dependencies between cached values. The `keyref_match_spec/2` helper makes it
-  easy to find and clean up these reference entries.
-
-  The function builds a match spec that finds all cache keys (reference keys)
-  that point to a specific referenced key. This is useful for:
-
-    * Invalidating all entries that depend on a specific key
-    * Counting how many references point to a key
-    * Getting a list of dependent cache keys
-
-  #### Examples
-
-      import Nebulex.Adapters.Local.QueryHelper
-
-      # Delete all references to a specific key (any cache)
-      ms = keyref_match_spec(:user_123)
-      MyCache.delete_all!(query: ms)
-
-      # Delete references in a specific cache only
-      ms = keyref_match_spec(:user_123, cache: MyApp.UserCache)
-      MyCache.delete_all!(query: ms)
-
-      # Count how many cache entries reference a key
-      ms = keyref_match_spec(:product_456)
-      count = MyCache.count_all!(query: ms)
-
-      # Get all cache keys that reference a specific key
-      ms = keyref_match_spec(:user_123)
-      reference_keys = MyCache.get_all!(query: ms)
-
-  #### Example: Invalidating cached method results
-
-  When using the `:references` option with caching decorators, you can easily
-  invalidate all cached results that depend on a specific entity:
-
-      defmodule MyApp.UserAccounts do
-        use Nebulex.Caching, cache: MyApp.Cache
-        use Nebulex.Adapters.Local.QueryHelper
-
-        @decorate cacheable(key: id)
-        def get_user_account(id) do
-          # your logic ...
-        end
-
-        @decorate cacheable(key: email, references: &(&1 && &1.id))
-        def get_user_account_by_email(email) do
-          # your logic ...
-        end
-
-        @decorate cacheable(key: token, references: &(&1 && &1.id))
-        def get_user_account_by_token(token) do
-          # your logic ...
-        end
-
-        @decorate cache_evict(key: user.id, query: &__MODULE__.keyref_query/1)
-        def update_user_account(user, attrs) do
-          # your logic ...
-        end
-
-        def keyref_query(%{args: [user | _]} = _context) do
-          keyref_match_spec(user.id)
-        end
-      end
-
-  > See `Nebulex.Adapters.Local.QueryHelper` for complete documentation.
+  Use these match specs with `get_all`, `count_all`, `delete_all`, and
+  `stream`. See `Nebulex.Adapters.Local.QueryHelper` for the full syntax and
+  more examples, and its
+  ["Tags and caching decorators"](Nebulex.Adapters.Local.QueryHelper.html#module-tags-and-caching-decorators)
+  section for using it with `Nebulex.Caching` decorators and cache references.
 
   ## Tagging entries
 
-  The local adapter supports tagging cache entries with arbitrary terms via the
-  `:tag` option. Tags provide a powerful way to organize and query cache entries
-  by associating metadata with them. This is especially useful for:
+  Use the `:tag` option to attach any Elixir term to an entry. You can then
+  query or delete the entries with that tag. Entries written without a tag
+  have a `nil` tag.
 
-    * **Logical grouping** - Group related entries (e.g., all entries for a
-      specific user, session, or feature).
-    * **Selective invalidation** - Delete all entries with a specific tag
-      without affecting other cached data.
-    * **Efficient filtering** - Query entries by tag using ETS match specs.
-
-  ### Tagging entries
-
-  You can tag entries when using `put/3`, `put!/3`, `put_all/2`, `put_all!/2`,
-  and related operations:
-
-      # Tag a single entry
-      MyCache.put("user:123:profile", user_data, tag: :user_123)
-
-      # Tag multiple entries at once
-      MyCache.put_all(
-        [
-          {"session:abc:data", session_data},
-          {"session:abc:prefs", preferences},
-        ],
-        tag: :session_abc
-      )
-
-      # Different tags for different entry groups
+      MyCache.put("user:123:profile", profile, tag: {:user, 123})
       MyCache.put_all([a: 1, b: 2, c: 3], tag: :group_a)
-      MyCache.put_all([d: 4, e: 5, f: 6], tag: :group_b)
 
-  When you don't provide a tag, entries are stored with a `nil` tag value.
-
-  ### Querying by tag
-
-  You can query entries by tag using either **QueryHelper** (recommended for
-  cleaner syntax) or **Ex2ms**:
-
-      # Using QueryHelper (recommended)
       use Nebulex.Adapters.Local.QueryHelper
 
-      # Get all values for entries with a specific tag
-      match_spec = match_spec value: v, tag: t, where: t == :group_a, select: v
-      MyCache.get_all!(query: match_spec)
+      # Get the values of the entries tagged :group_a
+      ms = match_spec value: v, tag: t, where: t == :group_a, select: v
+      MyCache.get_all!(query: ms)
       #=> [1, 2, 3]
 
-      # Delete all entries with a specific tag
-      match_spec = match_spec tag: t, where: t == :group_a, select: true
-      MyCache.delete_all!(query: match_spec)
+      # Delete all the entries of user 123
+      ms = match_spec tag: t, where: t == {:user, 123}
+      MyCache.delete_all!(query: ms)
 
-      # Query entries with multiple tags (return key-value tuples)
-      match_spec = match_spec key: k, value: v, tag: t,
-                             where: t == :group_a or t == :group_b,
-                             select: {k, v}
-      MyCache.get_all!(query: match_spec)
-      #=> [a: 1, b: 2, c: 3, d: 4, e: 5, f: 6]
+  Tags are metadata, not part of the key. With the default `:set` table type,
+  writing the same key replaces its entry regardless of the tag.
 
-      # Count entries with a specific tag
-      match_spec = match_spec tag: t, where: t == :group_a, select: true
-      MyCache.count_all!(query: match_spec)
-      #=> 3
+  With `Ex2ms`, match the tag as the last element of the entry tuple:
 
-  Alternatively, you can use **Ex2ms** if you need to work with the raw tuple
-  structure:
-
-      # Using Ex2ms (alternative approach)
       import Ex2ms
 
-      # Get all values for entries with a specific tag
       match_spec = fun do
         {_, _, value, _, _, tag} when tag == :group_a -> value
       end
@@ -498,211 +256,21 @@ defmodule Nebulex.Adapters.Local do
       MyCache.get_all!(query: match_spec)
       #=> [1, 2, 3]
 
-      # Query entries with multiple tags
-      match_spec = fun do
-        {_, key, value, _, _, tag} when tag == :group_a or tag == :group_b ->
-          {key, value}
-      end
-
-      MyCache.get_all!(query: match_spec)
-      #=> [a: 1, b: 2, c: 3, d: 4, e: 5, f: 6]
-
-  ### Practical example
-
-  Here's a complete example showing how to use tags for user session management:
-
-      # Store user session data with tags
-      user_id = 123
-      session_id = "abc-def-ghi"
-
-      MyCache.put_all([
-        {"user:\#{user_id}:profile", user_profile},
-        {"user:\#{user_id}:settings", user_settings},
-        {"user:\#{user_id}:permissions", permissions}
-      ], tag: {:user, user_id})
-
-      # Later, invalidate all data for this user using QueryHelper
-      use Nebulex.Adapters.Local.QueryHelper
-
-      invalidate_user = match_spec tag: t, where: t == {:user, 123}, select: true
-      MyCache.delete_all!(query: invalidate_user)
-
-      # Or using Ex2ms (alternative)
-      import Ex2ms
-
-      invalidate_user = fun do
-        {_, _, _, _, _, tag} when tag == {:user, 123} -> true
-      end
-
-      MyCache.delete_all!(query: invalidate_user)
-
-  Tags can be any Elixir term (atoms, tuples, strings, etc.), giving you
-  flexibility in how you organize your cache entries.
-
-  ## Using Caching Decorators with QueryHelper
-
-  The `Nebulex.Caching` decorators (`@decorate`) integrate seamlessly with
-  QueryHelper and tagging for powerful cache management patterns. This section
-  shows practical examples of combining decorators with QueryHelper and tags.
-
-  ### Entry Tagging with Decorators
-
-  You can tag entries automatically when using `@decorate cacheable` and
-  `@decorate cache_put` by specifying the `:tag` option:
-
-      defmodule MyApp.UserCache do
-        use Nebulex.Caching, cache: MyApp.Cache
-        use Nebulex.Adapters.Local.QueryHelper
-
-        # Cache user data, tagged with the user ID
-        @decorate cacheable(key: {:user, user_id}, opts: [tag: {:user, user_id}])
-        def get_user(user_id) do
-          # fetch user from database
-          {:ok, user}
-        end
-
-        # Cache user permissions under their own key, with the same tag
-        @decorate cacheable(key: {:permissions, user_id}, opts: [tag: {:user, user_id}])
-        def get_user_permissions(user_id) do
-          # fetch permissions from database
-          {:ok, permissions}
-        end
-
-        # Store session data with automatic tagging
-        @decorate cache_put(key: session_id, opts: [tag: :sessions])
-        def create_session(session_id, data) do
-          data
-        end
-      end
-
-  Tags do not namespace keys: entries with different tags but the same key
-  overwrite each other, so give each kind of data its own key.
-
-  ### Selective Cache Invalidation with Tags
-
-  Use the `@decorate cache_evict` decorator with QueryHelper to invalidate
-  entries by tag. This is useful for clearing related cached data:
-
-      defmodule MyApp.UserCache do
-        use Nebulex.Caching, cache: MyApp.Cache
-        use Nebulex.Adapters.Local.QueryHelper
-
-        # ... cacheable functions as above ...
-
-        # Evict all cached data for a specific user
-        @decorate cache_evict(query: &evict_user_query/1)
-        def invalidate_user(user_id) do
-          :ok
-        end
-
-        defp evict_user_query(%{args: [user_id]} = _context) do
-          # Return a QueryHelper match spec to evict the user's entries by tag
-          match_spec tag: t, where: t == {:user, user_id}, select: true
-        end
-      end
-
-  ### Cache Reference Invalidation with keyref_match_spec
-
-  When using the `:references` option to track cache dependencies, you can
-  use `keyref_match_spec` with `cache_evict` to invalidate all dependent
-  entries:
-
-      defmodule MyApp.UserAccounts do
-        use Nebulex.Caching, cache: MyApp.Cache
-        use Nebulex.Adapters.Local.QueryHelper
-
-        # Cache user account by ID
-        @decorate cacheable(key: user_id)
-        def get_user_account(user_id) do
-          fetch_user(user_id)
-        end
-
-        # Cache user account by email, referencing the user ID
-        @decorate cacheable(key: email, references: &(&1 && &1.id))
-        def get_user_account_by_email(email) do
-          user = fetch_user_by_email(email)
-          {:ok, user}
-        end
-
-        # Cache user account by token, also referencing the user ID
-        @decorate cacheable(key: token, references: &(&1 && &1.id))
-        def get_user_account_by_token(token) do
-          user = fetch_user_by_token(token)
-          {:ok, user}
-        end
-
-        # Evict all cache entries referencing a specific user
-        # This invalidates all lookups (by id, email, token) in one operation
-        @decorate cache_evict(key: user_id, query: &invalidate_refs/1)
-        def update_user_account(user_id, attrs) do
-          :ok
-        end
-
-        defp invalidate_refs(%{args: [user_id | _]} = _context) do
-          keyref_match_spec(user_id)
-        end
-      end
-
-  ### Practical Pattern: Clearing All Session Data
-
-  Here's a complete example showing how to manage user sessions with automatic
-  tagging and selective eviction:
-
-      defmodule MyApp.Sessions do
-        use Nebulex.Caching, cache: MyApp.Cache
-        use Nebulex.Adapters.Local.QueryHelper
-
-        # Store session data with automatic tagging by user ID
-        @decorate cache_put(key: session_id, opts: [tag: {:session, user_id}])
-        def store_session(user_id, session_id, data) do
-          data
-        end
-
-        # Evict all sessions for a specific user when they log out
-        @decorate cache_evict(query: &evict_user_sessions_query/1)
-        def logout_user(user_id) do
-          :ok
-        end
-
-        defp evict_user_sessions_query(%{args: [user_id]} = _context) do
-          match_spec tag: t, where: t == {:session, user_id}
-        end
-
-        # Clear all sessions across all users (e.g., during maintenance)
-        @decorate cache_evict(query: &evict_all_sessions_query/1)
-        def clear_all_sessions do
-          :ok
-        end
-
-        defp evict_all_sessions_query(_context) do
-          # Match all entries with a session tag (pattern {:session, _})
-          match_spec tag: t, where: is_tuple(t) and elem(t, 0) == :session
-        end
-      end
-
-  > The combination of decorators, QueryHelper, and tagging provides a clean,
-  > declarative way to manage cache lifecycles with minimal boilerplate.
-
   ## Transaction API
 
-  This adapter implements the `Nebulex.Adapter.Transaction` behaviour using
-  `Nebulex.Locks`, a lightweight ETS-based locking mechanism optimized for
-  single-node scenarios. This implementation provides significantly better
-  performance compared to distributed locking mechanisms (e.g., `:global`)
-  while maintaining the same transaction API.
+  This adapter implements `Nebulex.Adapter.Transaction` using
+  `Nebulex.Locks`, which keeps the locks in ETS on the local node.
 
   The `transaction` command accepts the following options:
 
   #{Nebulex.Locks.Options.options_docs()}
 
-  The locks manager can be customized via the `:lock_opts` configuration
-  option when starting the cache. See the configuration options above for
-  more details.
+  To customize the locks manager, set the `:lock_opts` option when starting
+  the cache (see the configuration options above).
 
   ## Extended API (extra functions)
 
-  This adapter provides some additional convenience functions to the
-  `Nebulex.Cache` API.
+  The adapter adds these functions to the `Nebulex.Cache` API.
 
   Creating new generations:
 
@@ -808,7 +376,7 @@ defmodule Nebulex.Adapters.Local do
       end
 
       @doc """
-      A convenience function for reset the GC interval.
+      Resets the GC interval.
       """
       def reset_gc_interval do
         Generation.reset_gc_interval(get_dynamic_cache())

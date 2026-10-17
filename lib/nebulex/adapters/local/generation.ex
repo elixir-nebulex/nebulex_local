@@ -2,20 +2,14 @@ defmodule Nebulex.Adapters.Local.Generation do
   @moduledoc """
   This module implements the generation manager and garbage collector.
 
-  The generational garbage collector manages the heap as several sub-heaps,
-  known as generations, based on the age of the objects. An object is allocated
-  in the youngest generation, sometimes called the nursery, and is promoted to
-  an older generation if its lifetime exceeds the threshold of its current
-  generation (defined by option `:gc_interval`). Every time the GC runs, a new
-  cache generation is created, and the oldest one is deleted.
+  The generation manager creates cache generations and schedules the deletion
+  of retired generation tables. The adapter stores new entries in the newer
+  generation and promotes entries from the older generation when they are
+  fetched.
 
-  The GC is triggered upon the following events:
-
-    * When the `:gc_interval` times outs.
-    * When the scheduled memory check times out. The memory check is executed
-      when the `:max_size` or `:allocated_memory` options (or both) are
-      configured. Furthermore, the memory check interval is determined by
-      option `:gc_memory_check_interval`.
+  Generations rotate on the configured `:gc_interval`, when a size or memory
+  check reaches its threshold, or when a caller explicitly requests a new
+  generation.
 
   When a new generation is created, the oldest one is removed from the active
   generations at once, so new operations no longer see it. Its tables are

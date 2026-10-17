@@ -34,8 +34,8 @@ defmodule Nebulex.Adapters.Local.Options do
       required: false,
       default: true,
       doc: """
-      Since the adapter uses ETS tables internally, this option is when creating
-      a new table or generation. See `:ets.new/2` options.
+      Sets the ETS `:read_concurrency` option for each generation table. See
+      `:ets.new/2`.
       """
     ],
     write_concurrency: [
@@ -43,8 +43,8 @@ defmodule Nebulex.Adapters.Local.Options do
       required: false,
       default: true,
       doc: """
-      Since the adapter uses ETS tables internally, this option is when creating
-      a new table or generation. See `:ets.new/2` options.
+      Sets the ETS `:write_concurrency` option for each generation table. See
+      `:ets.new/2`.
       """
     ],
     compressed: [
@@ -52,8 +52,8 @@ defmodule Nebulex.Adapters.Local.Options do
       required: false,
       default: false,
       doc: """
-      Since the adapter uses ETS tables internally, this option is when creating
-      a new table or generation. See `:ets.new/2` options.
+      Sets the ETS `:compressed` option for each generation table. See
+      `:ets.new/2`.
       """
     ],
     backend_type: [
@@ -61,8 +61,7 @@ defmodule Nebulex.Adapters.Local.Options do
       required: false,
       default: :set,
       doc: """
-      Since the adapter uses ETS tables internally, this option is when creating
-      a new table or generation. See `:ets.new/2` options.
+      The ETS table type for each generation table. See `:ets.new/2`.
       """
     ],
     partitions: [
@@ -89,36 +88,32 @@ defmodule Nebulex.Adapters.Local.Options do
       type: :pos_integer,
       required: false,
       doc: """
-      The interval time in milliseconds for garbage collection to run, create
-      a new generation, make it the newer one, make the previous new generation
-      the old one, and finally remove the previous old one. If not provided
-      (or `nil`), the garbage collection never runs, so new generations must be
-      created explicitly, e.g., `MyCache.new_generation(opts)` (the default);
-      however, the adapter does not recommend this.
+      The interval between scheduled generation rotations, in milliseconds. If
+      omitted, periodic rotation is disabled. Size or memory checks can still
+      trigger rotations, and you can create a generation explicitly with
+      `MyCache.new_generation/1`.
 
       > #### Usage {: .warning}
       >
-      > Always provide the `:gc_interval` option so the garbage collector can
-      > work appropriately out of the box. Unless you explicitly want to turn
-      > off the garbage collection or handle it yourself.
+      > Set `:gc_interval` unless you want to rotate generations yourself.
+      > Without it, entries that are never fetched stay in the cache until a
+      > size or memory check or an explicit call creates a new generation.
       """
     ],
     max_size: [
       type: :pos_integer,
       required: false,
       doc: """
-      The maximum number of entries to store in the cache. If not provided
-      (or `nil`), the health check to validate and release memory is not
-      performed (the default).
+      The entry-count threshold that triggers a generation rotation during a
+      size check. If omitted, entry-count checks are disabled.
       """
     ],
     allocated_memory: [
       type: :pos_integer,
       required: false,
       doc: """
-      The maximum size in bytes for the cache storage. If not provided
-      (or `nil`), the health check to validate and release memory is not
-      performed (the default).
+      The memory threshold, in bytes, that triggers a generation rotation
+      during a memory check. If omitted, memory checks are disabled.
       """
     ],
     gc_memory_check_interval: [

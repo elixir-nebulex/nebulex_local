@@ -10,13 +10,14 @@
 
 ## About
 
-This adapter provides a high-performance generational local cache for Nebulex,
-inspired by [epocxy](https://github.com/duomark/epocxy). It uses a
-generational garbage collection with two-generation approach (new and old)
-for efficient memory management.
+`nebulex_local` is an in-memory cache adapter for [Nebulex][Nebulex], inspired
+by [epocxy](https://github.com/duomark/epocxy). It stores entries in ETS and
+uses two generations, newer and older, to manage eviction. Fetching an entry
+from the older generation moves it into the newer one. When the cache creates
+a new generation, it retires the oldest.
 
-See the [module documentation][online_docs] for detailed information about
-generational caching, concurrency handling, and configuration options.
+See the [module documentation][online_docs] for details on expiration,
+eviction, concurrency, and configuration.
 
 ## Installation
 
@@ -34,21 +35,20 @@ def deps do
 end
 ```
 
-To provide more flexibility and load only the needed dependencies, this adapter
-makes some dependencies optional:
+The following dependencies are optional. Add the ones your application uses:
 
-  - **`:telemetry`** - Add when you want to emit and consume telemetry events
-    for monitoring cache operations (recommended).
-   - **`:decorator`** - Add when you want to enable declarative decorator-based
-    caching (recommended).
-  - **`:shards`** - Add when using `backend: :shards` for intensive workloads
-    that benefit from partitioning across multiple ETS tables.
-  - **`:ex2ms`** - Add when using match specification query helpers for advanced
-    querying.
+  - **`:telemetry`** - To emit and consume Telemetry events for cache
+    operations (recommended).
+  - **`:decorator`** - To use the declarative caching decorators
+    (recommended).
+  - **`:shards`** - To use `backend: :shards`, which partitions the cache
+    across several ETS tables for intensive workloads.
+  - **`:ex2ms`** - To build match spec queries with
+    `Nebulex.Adapters.Local.QueryHelper`.
 
 ## Usage
 
-You can define a cache as follows:
+Define a cache module:
 
 ```elixir
 defmodule MyApp.LocalCache do
@@ -58,8 +58,8 @@ defmodule MyApp.LocalCache do
 end
 ```
 
-Where the configuration for the cache must be in your application
-environment, usually defined in your `config/config.exs`:
+Configure the cache in your application environment, usually in
+`config/config.exs`:
 
 ```elixir
 config :my_app, MyApp.LocalCache,
@@ -69,19 +69,18 @@ config :my_app, MyApp.LocalCache,
   gc_memory_check_interval: :timer.seconds(10)
 ```
 
-If your application was generated with a supervisor (by passing `--sup`
-to `mix new`) you will have a `lib/my_app/application.ex` file containing
-the application start callback that defines and starts your supervisor.
-You just need to edit the `start/2` function to start the cache as a
-supervisor on your application's supervisor:
+Add the cache to your application's supervision tree, usually in
+`lib/my_app/application.ex`:
 
 ```elixir
 def start(_type, _args) do
   children = [
-    {MyApp.LocalCache, []},
+    MyApp.LocalCache
   ]
 
-  ...
+  opts = [strategy: :one_for_one, name: MyApp.Supervisor]
+
+  Supervisor.start_link(children, opts)
 end
 ```
 
@@ -112,11 +111,9 @@ You will find the coverage report within `cover/excoveralls.html`.
 
 ## Benchmarks
 
-The adapter provides a set of basic benchmark tests using the library
-[benchee](https://github.com/PragTob/benchee), and they are located within
-the directory [benchmarks](./benchmarks).
-
-To run a benchmark test you have to run:
+The [benchmarks](./benchmarks) directory contains benchmarks for both
+backends, written with [Benchee](https://github.com/bencheeorg/benchee). To
+run one:
 
 ```
 $ MIX_ENV=test mix run benchmarks/BENCH_TEST_FILE
@@ -129,24 +126,20 @@ Where `BENCH_TEST_FILE` can be any of:
   * `local_with_shards_bench.exs`: benchmark for the local adapter using
     `:shards` backend.
 
-For example, for running the benchmark for the local adapter using `:shards`
-backend:
+For example, to run the benchmark for the `:shards` backend:
 
 ```
 $ MIX_ENV=test mix run benchmarks/local_with_shards_bench.exs
 ```
 
-Additionally, you can also run performance tests using `:basho_bench`.
-See [nebulex_bench example](https://github.com/elixir-nebulex/nebulex_examples/tree/master/nebulex_bench)
-for more information.
+You can also run performance tests with `:basho_bench`. See the
+[nebulex_bench example](https://github.com/elixir-nebulex/nebulex_examples/tree/master/nebulex_bench).
 
 ## Contributing
 
-Bug reports, feature requests, and pull requests are welcome. Use the
-[issue tracker](https://github.com/elixir-nebulex/nebulex_local/issues) for
-bug reports and feature requests, and open a
-[pull request](https://github.com/elixir-nebulex/nebulex_local/pulls) when
-you are ready to contribute.
+Use the [issue tracker](https://github.com/elixir-nebulex/nebulex_local/issues)
+for bug reports and feature requests. Contributions are welcome through
+[pull requests](https://github.com/elixir-nebulex/nebulex_local/pulls).
 
 Include tests for new or changed behavior, and leave
 [CHANGELOG.md](CHANGELOG.md) unchanged. Before submitting a pull request, run
