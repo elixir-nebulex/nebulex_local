@@ -17,14 +17,10 @@ defmodule Nebulex.Adapters.Local.Generation do
       configured. Furthermore, the memory check interval is determined by
       option `:gc_memory_check_interval`.
 
-  The oldest generation is deleted in two steps. First, the underlying ETS table
-  is flushed to release space and only marked for deletion as there may still be
-  processes referencing it. The actual deletion of the ETS table happens at the
-  next GC run. However, flushing is a blocking operation. Once started,
-  processes wanting to access the table must wait until it finishes.
-  To circumvent this, the flush can be delayed by configuring `:gc_cleanup_delay`
-  to allow time for these processes to complete their work without being
-  blocked.
+  When a new generation is created, the oldest one is removed from the active
+  generations at once, so new operations no longer see it. Its tables are
+  deleted after `:gc_cleanup_delay`, which gives operations that already hold
+  a reference to them time to finish.
   """
 
   use GenServer

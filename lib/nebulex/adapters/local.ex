@@ -37,72 +37,22 @@ defmodule Nebulex.Adapters.Local do
 
   ## Concurrency and resilience
 
-  The local adapter implements automatic retry logic to handle race conditions
-  that may occur when accessing ETS tables during garbage collection cycles.
-  When the garbage collector deletes an old generation, processes holding
-  references to that generation's table get an error when attempting to
-  access it: `ArgumentError` on the ETS backend, and `{:unknown_table, tab}`
-  on the `:shards` backend.
+  The garbage collector can delete a generation table while an operation still
+  holds a reference to it. Accessing that table raises `ArgumentError` on the
+  ETS backend, or `{:unknown_table, tab}` on the `:shards` backend.
 
-  To ensure resilience and prevent crashes, all cache operations automatically
-  retry up to **3 times** when encountering such errors. The retry mechanism:
+  Cache operations catch these errors, reload the generation references from
+  the metadata table, and retry up to 3 times, waiting 10 ms before each retry.
+  If the last retry fails too, the error propagates to the caller. Streams
+  built from match-spec queries are not retried, because they read the tables
+  lazily while the stream is consumed; streams with `{:in, keys}` retry each
+  chunk of keys.
 
-    * **Catches the errors** that occur due to deleted generation tables.
-    * **Re-fetches fresh generation references** from the metadata table.
-    * **Retries the operation** with the updated references.
-    * **Prevents infinite loops** by limiting retries to a maximum of 3
-      attempts.
-    * **Adds a small delay** (10ms) between retries to allow GC operations
-      to complete.
-
-  This behavior is transparent to users and ensures that:
-
-    * Operations remain reliable even under high concurrency.
-    * Cache operations succeed despite concurrent generation changes.
-    * No manual error handling is required for GC-related race conditions.
-    * The system gracefully handles generation transitions.
-
-  ### The role of `:gc_cleanup_delay`
-
-  It's important to note that while the automatic retry logic provides an extra
-  layer of safety, **race conditions are unlikely to occur in practice** due to
-  the `:gc_cleanup_delay` configuration option (defaults to 10 seconds).
-
-  When garbage collection runs and creates a new generation, the old generation
-  is not deleted immediately. Instead, it's kept alive for the duration
-  specified by `:gc_cleanup_delay`. This grace period allows ongoing operations
-  that hold references to the old generation to complete successfully before the
-  table is actually deleted.
-
-  The automatic retry mechanism serves as a **safeguard** for edge cases where:
-
-    * Operations take longer than the cleanup delay.
-    * Extremely high concurrency scenarios.
-    * Systems under heavy load.
-
-  **Recommendation**: Configure `:gc_cleanup_delay` with a reasonable timeout
-  (the default 10 seconds is appropriate for most use cases). This ensures
-  concurrent operations have sufficient time to transition gracefully, making
-  the retry mechanism rarely necessary.
-
-  ### Example scenario
-
-  Consider this race condition scenario:
-
-  1. **Process A** fetches generation references and starts a `fetch/2`
-    operation.
-  2. **Process B** (GC) deletes the old generation while Process A is accessing
-    it.
-  3. **Process A** encounters an `ArgumentError` when trying to access the
-    deleted table.
-  4. **Automatic retry** catches the error, fetches fresh generation references,
-    and retries.
-  5. **Operation succeeds** using the updated generation references.
-
-  > **This automatic retry logic applies to all cache operations except
-  > streams built from match-spec queries**, which read the tables lazily
-  > while the stream is consumed. Streams with `{:in, keys}` retry each chunk
-  > of keys.
+  The `:gc_cleanup_delay` option (10 seconds by default) makes these retries
+  rare. When a new generation is created, the oldest one is removed from the
+  active generations at once, but its tables are deleted only after the delay,
+  so operations already using them have time to finish. The delay does not
+  keep the retired entries available to new operations.
 
   ## Configuration options
 
@@ -140,7 +90,7 @@ defmodule Nebulex.Adapters.Local do
         gc_interval: :timer.hours(12),
         max_size: 1_000_000,
         allocated_memory: 2_000_000_000,
-        gc_memory_check_interval: :timer.seconds(10)
+        gc_memory_check_interval: :timer.seconds(10),
         partitions: System.schedulers_online() * 2
 
   If your application was generated with a supervisor (by passing `--sup`
@@ -159,99 +109,57 @@ defmodule Nebulex.Adapters.Local do
 
   ## The `:ttl` option
 
-  The `:ttl` is a runtime option meant to set a key's expiration time. It is
-  evaluated on-demand when a key is retrieved, and if it has expired, it is
-  removed from the cache. Hence, it can not be used as an eviction method;
-  it is more for maintaining the cache's integrity and consistency. For this
-  reason, you should always configure the eviction or GC options. See the
-  ["Eviction policy"](#module-eviction-policy) section for more information.
+  The `:ttl` option sets an entry's expiration time. Reads check it and treat
+  an expired entry as missing, removing it from the cache. No timer removes
+  the entry when its TTL ends, so the TTL is not an eviction mechanism;
+  configure the GC options for that. See the
+  ["Eviction policy"](#module-eviction-policy) section.
 
-  ### Caveats when using `:ttl` option:
-
-    * When using the `:ttl` option, ensure it is less than `:gc_interval`.
-      Otherwise, the key may be evicted, and the `:ttl` hasn't happened yet
-      because the garbage collector may run before a fetch operation has
-      evaluated the `:ttl` and expired the key.
-    * Consider the following scenario based on the previous caveat. You have
-      `:gc_interval` set to 1 hrs. Then you put a new key with `:ttl` set to
-      2 hrs. One minute later, the GC runs, creating a new generation, and the
-      key ends up in the older generation. Therefore, if the next GC cycle
-      occurs (1 hr later) before the key is fetched (moving it to the newer
-      generation), it is evicted from the cache when the GC removes the older
-      generation so it won't be retrievable anymore.
+  Generation rotation can evict an entry before its TTL ends, so a TTL does
+  not guarantee that an entry stays cached that long. An entry that is not
+  read rarely survives more than two `:gc_interval` periods, so a much longer
+  TTL may never take effect.
 
   ## Eviction policy
 
-  This adapter implements a generational cache, which means its primary eviction
-  mechanism pushes a new cache generation and removes the oldest one. This
-  mechanism ensures the garbage collector removes the least frequently used keys
-  when it runs and deletes the oldest generation. At the same time, only the
-  most frequently used keys are always available in the newer generation. In
-  other words, the generation cache also enforces an LRU (Least Recently Used)
-  eviction policy.
+  The adapter evicts entries by retiring the oldest generation. Fetching an
+  entry from the older generation moves it into the newer one, so it survives
+  the next rotation. This approximates eviction by recent access; the adapter
+  does not keep an exact LRU order or count how often entries are accessed.
 
-  The following conditions trigger the garbage collector to run:
+  The garbage collector creates a new generation, retiring the oldest one:
 
-    * When the time interval defined by `:gc_interval` is completed. This
-      makes the garbage-collector process to run creating a new generation
-      and forcing to delete the oldest one. This interval defines how often
-      you want to evict the least frequently used entries or the retention
-      period for the cached entries. The retention period for the least
-      frequently used entries is equivalent to two garbage collection cycles
-      (since we keep two generations), which means the GC removes all entries
-      not accessed in the cache during that time.
+    * Every `:gc_interval`. With periodic rotation alone, an entry that is
+      written and never read stays available for one to two `:gc_interval`
+      periods, depending on when it was written.
 
-    * When the time interval defined by `:gc_memory_check_interval` is
-      completed. Beware: This option works alongside the `:max_size` and
-      `:allocated_memory` options. The interval defines when the GC must
-      run to validate the cache size and memory and release space if any
-      of the limits are exceeded. It is mainly for keeping the cached data
-      under the configured memory size limits and avoiding running out of
-      memory at some point.
+    * When a size or memory check finds that `:max_size` or
+      `:allocated_memory` is exceeded. The checks run every
+      `:gc_memory_check_interval` when either option is set, and can evict
+      entries sooner than the periodic rotation.
 
   ### Configuring the GC options
 
-  This section helps you understand how the different configuration options work
-  and gives you an idea of what values to set, especially if this is your first
-  time using Nebulex with the local adapter.
+  Set `:gc_interval` to control how often the cache rotates generations.
+  Shorter intervals evict unread entries sooner; longer intervals keep them
+  longer. For example, with `gc_interval: :timer.hours(12)`, an entry that is
+  never read is evicted within 12 to 24 hours.
 
-  Understanding a few things in advance is essential to configure the cache
-  with appropriate values. For example, the average size of an entry so we
-  can configure a reasonable value for the max size or allocated memory.
-  Also, the reads and writes load. The problem is that sometimes it is
-  challenging to have this information in advance, especially when it is
-  a new app or when we use the cache for the first time. The following
-  are tips to help you to configure the cache (especially if it is your
-  for the first time):
+  Set `:max_size`, `:allocated_memory`, or both to trigger extra rotations
+  when the cache reaches that size. Choose the values from the expected number
+  and size of entries and the memory available to your application.
 
-    * To configure the GC, consider the retention period for the least
-      frequently used entries you desire. For example, if the GC is 1 hr, you
-      will keep only those entries accessed periodically during the last 2 hrs
-      (two GC cycles, as outlined above). If it is your first time using the
-      local adapter, you may start configuring the `:gc_interval` to 12 hrs to
-      ensure daily data retention. Then, you can analyze the data and change the
-      value based on your findings.
-
-    * Configure the `:max_size` or `:allocated_memory` option (or both) to keep
-      memory healthy under the given limits (avoid running out of memory).
-      Configuring these options will ensure the GC releases memory space
-      whenever a limit is reached or exceeded. For example, one may assign 50%
-      of the total memory to the `:allocated_memory`. It depends on how much
-      memory you need and how much your app needs to run. For the `:max_size`,
-      consider how many entries you expect to keep in the cache; you could start
-      with something between `100_000` and `1_000_000`.
-
-    * Finally, when configuring `:max_size` or `:allocated_memory` (or both),
-      you must also configure `:gc_memory_check_interval` (defaults to 10 sec).
-      By default, the GC will run every 10 seconds to validate the cache size
-      and memory.
+  These thresholds are checked periodically, so they are not hard limits: the
+  cache can exceed them between checks, and retired tables stay allocated
+  until they are deleted after `:gc_cleanup_delay`. The checks run every
+  `:gc_memory_check_interval`, which defaults to 10 seconds.
 
   ## Queryable API
 
   Since the adapter implementation uses ETS tables underneath, the query must be
   a valid [**ETS Match Spec**](https://www.erlang.org/doc/man/ets#match_spec).
-  However, there are some predefined or shorthand queries you can use. See the
-  ["Predefined queries"](#module-predefined-queries) section for information.
+  To query specific keys, use `{:in, keys}` instead (see the `{:in, keys}`
+  queries section below).
 
   The adapter defines an entry as a tuple `{:entry, key, value, touched, exp, tag}`,
   meaning the match pattern within the ETS Match Spec must be like
@@ -356,7 +264,8 @@ defmodule Nebulex.Adapters.Local do
       wildcarded.
     * **`:where`** - Optional guard clause with conditions (supports all ETS
       guard functions).
-    * **`:select`** - Required return expression specifying what to return.
+    * **`:select`** - Optional return expression specifying what to return
+      (defaults to `true`).
 
   ### Examples
 
@@ -481,32 +390,31 @@ defmodule Nebulex.Adapters.Local do
   invalidate all cached results that depend on a specific entity:
 
       defmodule MyApp.UserAccounts do
-          use Nebulex.Caching, cache: MyApp.Cache
-          use Nebulex.Adapters.Local.QueryHelper
+        use Nebulex.Caching, cache: MyApp.Cache
+        use Nebulex.Adapters.Local.QueryHelper
 
-          @decorate cacheable(key: id)
-          def get_user_account(id) do
-            # your logic ...
-          end
+        @decorate cacheable(key: id)
+        def get_user_account(id) do
+          # your logic ...
+        end
 
-          @decorate cacheable(key: email, references: &(&1 && &1.id))
-          def get_user_account_by_email(email) do
-            # your logic ...
-          end
+        @decorate cacheable(key: email, references: &(&1 && &1.id))
+        def get_user_account_by_email(email) do
+          # your logic ...
+        end
 
-          @decorate cacheable(key: token, references: &(&1 && &1.id))
-          def get_user_account_by_token(token) do
-            # your logic ...
-          end
+        @decorate cacheable(key: token, references: &(&1 && &1.id))
+        def get_user_account_by_token(token) do
+          # your logic ...
+        end
 
-          @decorate cache_evict(key: user.id, query: &__MODULE__.keyref_query/1)
-          def update_user_account(user, attrs) do
-            # your logic ...
-          end
+        @decorate cache_evict(key: user.id, query: &__MODULE__.keyref_query/1)
+        def update_user_account(user, attrs) do
+          # your logic ...
+        end
 
-          def keyref_query(%{args: [user | _]} = _context) do
-            keyref_match_spec(user.id)
-          end
+        def keyref_query(%{args: [user | _]} = _context) do
+          keyref_match_spec(user.id)
         end
       end
 
@@ -646,15 +554,15 @@ defmodule Nebulex.Adapters.Local do
         use Nebulex.Caching, cache: MyApp.Cache
         use Nebulex.Adapters.Local.QueryHelper
 
-        # Cache user data with automatic tagging
-        @decorate cacheable(key: user_id, opts: [tag: :users])
+        # Cache user data, tagged with the user ID
+        @decorate cacheable(key: {:user, user_id}, opts: [tag: {:user, user_id}])
         def get_user(user_id) do
           # fetch user from database
           {:ok, user}
         end
 
-        # Cache user permissions with automatic tagging
-        @decorate cacheable(key: user_id, opts: [tag: :permissions])
+        # Cache user permissions under their own key, with the same tag
+        @decorate cacheable(key: {:permissions, user_id}, opts: [tag: {:user, user_id}])
         def get_user_permissions(user_id) do
           # fetch permissions from database
           {:ok, permissions}
@@ -666,6 +574,9 @@ defmodule Nebulex.Adapters.Local do
           data
         end
       end
+
+  Tags do not namespace keys: entries with different tags but the same key
+  overwrite each other, so give each kind of data its own key.
 
   ### Selective Cache Invalidation with Tags
 
@@ -684,9 +595,9 @@ defmodule Nebulex.Adapters.Local do
           :ok
         end
 
-        defp evict_user_query(context) do
-          # Return a QueryHelper match spec to evict entries by tag
-          match_spec tag: t, where: t == :users, select: true
+        defp evict_user_query(%{args: [user_id]} = _context) do
+          # Return a QueryHelper match spec to evict the user's entries by tag
+          match_spec tag: t, where: t == {:user, user_id}, select: true
         end
       end
 
