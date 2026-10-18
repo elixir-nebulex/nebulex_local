@@ -1410,9 +1410,9 @@ defmodule Nebulex.Adapters.LocalTest do
 
     defp get_from_old(cache, name, key) do
       cache.with_dynamic_cache(name, fn ->
-        cache.generations()
-        |> List.last()
-        |> get_from(name, key)
+        [_newer, older] = cache.generations()
+
+        get_from(older, name, key)
       end)
     end
 

@@ -371,6 +371,7 @@ defmodule Nebulex.Adapters.Local do
       @doc """
       A convenience function for creating new generations.
       """
+      @spec new_generation(keyword()) :: :ok
       def new_generation(opts \\ []) do
         Generation.new(get_dynamic_cache(), opts)
       end
@@ -378,6 +379,7 @@ defmodule Nebulex.Adapters.Local do
       @doc """
       Resets the GC interval.
       """
+      @spec reset_gc_interval() :: :ok
       def reset_gc_interval do
         Generation.reset_gc_interval(get_dynamic_cache())
       end
@@ -385,6 +387,7 @@ defmodule Nebulex.Adapters.Local do
       @doc """
       A convenience function for retrieving the current generations.
       """
+      @spec generations() :: [:ets.tid()]
       def generations do
         Generation.list(get_dynamic_cache())
       end
@@ -392,6 +395,7 @@ defmodule Nebulex.Adapters.Local do
       @doc """
       A convenience function for retrieving the newer generation.
       """
+      @spec newer_generation() :: :ets.tid()
       def newer_generation do
         Generation.newer(get_dynamic_cache())
       end

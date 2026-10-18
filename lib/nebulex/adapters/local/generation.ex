@@ -73,7 +73,7 @@ defmodule Nebulex.Adapters.Local.Generation do
       Nebulex.Adapters.Local.Generation.new(MyCache, gc_interval_reset: false)
 
   """
-  @spec new(server_ref(), opts()) :: [atom()]
+  @spec new(server_ref(), opts()) :: :ok
   def new(server_ref, opts \\ []) do
     # Validate options.
     opts = Options.validate_gc_runtime_opts!(opts)
