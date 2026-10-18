@@ -141,11 +141,32 @@ defmodule Nebulex.Adapters.Local.InfoStatsTest do
     end
   end
 
-  describe "disabled stats:" do
-    setup_with_cache Cache, stats: false
+  for backend <- [:ets, :shards] do
+    describe "#{backend} with disabled stats:" do
+      setup_with_cache Cache, stats: false, backend: unquote(backend)
 
-    test "c:Nebulex.Cache.stats/1 returns empty stats when counter is not set" do
-      assert Cache.info!(:stats) == Stats.new()
+      test "c:Nebulex.Cache.stats/1 returns empty stats when counter is not set" do
+        assert Cache.info!(:stats) == Stats.new()
+      end
+
+      test "generation rotation evicts only the oldest entries" do
+        assert Cache.put!(:a, 1) == :ok
+        assert Cache.new_generation() == :ok
+        assert Cache.put!(:b, 2) == :ok
+        assert Cache.new_generation() == :ok
+        assert Cache.get(:a) == {:ok, nil}
+
+        assert Cache.get!(:b) == 2
+      end
+
+      test "delete_all clears both generations" do
+        assert Cache.put!(:a, 1) == :ok
+        assert Cache.new_generation() == :ok
+        assert Cache.put!(:b, 2) == :ok
+        assert Cache.delete_all!() == 2
+
+        assert Cache.count_all!() == 0
+      end
     end
   end
 end

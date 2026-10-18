@@ -41,13 +41,25 @@ is in `lib/` and `test/`.
 - `Generation` is the GenServer that owns the generation tables and runs
   the GC (table rotation); it creates and deletes tables through
   `Backend`. `Metadata` holds the current generation references and the
-  stats counters.
+  stats counters and the internal per-key lock table.
 - `Backend` defines the ETS/`:shards` abstraction; `Backend.ETS` and
   `Backend.Shards` implement it (see Non-Negotiable #2).
 - `QueryHelper` builds match specs for queries. `Options` and
   `Locks.Options` hold the NimbleOptions schemas; all config is validated
   there.
 - `Nebulex.Locks` provides the ETS-based locks that back transactions.
+
+Single-key writes and promotion share an internal per-key lock. Promotion
+rechecks the entry after acquiring the lock, so a stale read cannot restore
+an entry removed by `delete`, `take`, or `delete_all(in: keys)`. Counters use
+one generation snapshot for validation, promotion, and increment. Hits in
+the newest generation remain lock-free. Bulk writes and match-spec queries
+retain their existing non-transactional semantics.
+
+These locks live in a separate ETS table owned with the adapter metadata;
+they do not use the configurable transaction lock leases. A lock is released
+when the operation returns or raises, and a subsequent contender can reclaim
+it if its owner has died.
 
 ---
 
