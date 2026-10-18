@@ -4,8 +4,8 @@ This repository is `nebulex_local`, the generational local cache adapter
 for [Nebulex](https://github.com/elixir-nebulex/nebulex). The shared rules
 come from the `nebulex` dependency, so run `mix deps.get` first; the
 `@deps/…` files do not exist in a fresh clone. The workflow below says what
-to read for each kind of task; this repo's architecture guide replaces the
-core one.
+to read for each kind of task; where it says `architecture.md`, read this
+repo's guide (core's applies for context).
 
 @deps/nebulex/usage-rules/workflow.md
 
@@ -23,7 +23,9 @@ mix nbx.setup
 NEBULEX_PATH=nebulex mix test
 ```
 
-To run against another checkout, point `NEBULEX_PATH` at it.
+To run against another checkout, point `NEBULEX_PATH` at it. Every
+`mix test` and `mix precommit` command in the shared workflow needs the
+`NEBULEX_PATH=nebulex` prefix here.
 
 <!-- usage-rules-start -->
 <!-- nebulex:nebulex-start -->

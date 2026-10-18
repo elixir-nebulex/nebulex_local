@@ -91,13 +91,10 @@ link to them. A stale architecture guide is worse than no guide.
 NEBULEX_PATH=nebulex mix precommit
 ```
 
-### 6. `mix docs` must produce no warnings
+It includes the docs build with warnings as errors; fix the root cause of a
+docs warning, do not suppress it.
 
-```bash
-mix docs --warnings-as-errors
-```
-
-### 7. Read why before changing subtle behavior
+### 6. Read why before changing subtle behavior
 
 The reasons behind the subtle behavior (the promotion order, the retry on
 deleted tables, and the per-key `{:in, keys}` lookups) are in the module docs,
