@@ -4,7 +4,8 @@ All notable changes to this project will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## [v3.1.0](https://github.com/elixir-nebulex/nebulex_local/tree/v3.1.0) (2026-10-18)
+> [Full Changelog](https://github.com/elixir-nebulex/nebulex_local/compare/v3.0.0...v3.1.0)
 
 ### Enhancements
 

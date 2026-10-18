@@ -26,7 +26,7 @@ Add `:nebulex_local` to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:nebulex_local, "~> 3.0"},
+    {:nebulex_local, "~> 3.1"},
     {:telemetry, "~> 0.4 or ~> 1.0"}, # For observability/telemetry support
     {:decorator, "~> 1.4"},           # For declarative caching
     {:shards, "~> 1.1"},              # For high concurrency workloads with partitioning
