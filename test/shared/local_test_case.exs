@@ -114,6 +114,31 @@ defmodule Nebulex.Adapters.LocalTest do
         assert cache.incr!(:counter, 2) == 3
       end
 
+      test "replace updates an explicit tag and preserves an omitted tag", %{
+        cache: cache,
+        name: name
+      } do
+        for older? <- [false, true], keep_ttl? <- [false, true] do
+          assert cache.put(:tagged, :old, tag: :original) == :ok
+
+          if older?, do: new_generation(cache, name)
+
+          assert cache.replace!(:tagged, :new, tag: :changed, keep_ttl: keep_ttl?)
+          assert cache.count_all!(query: match_spec(tag: t, where: t == :changed)) == 1
+          assert cache.get!(:tagged) == :new
+
+          assert cache.replace!(:tagged, :preserved, keep_ttl: keep_ttl?)
+
+          assert cache.count_all!(query: match_spec(tag: t, where: t == :changed)) == 1
+          assert cache.get!(:tagged) == :preserved
+
+          assert cache.replace!(:tagged, :cleared, tag: nil, keep_ttl: keep_ttl?)
+
+          assert cache.count_all!(query: match_spec(tag: t, where: t == nil)) == 1
+          assert cache.get!(:tagged) == :cleared
+        end
+      end
+
       test "fetch_or_store stores the value in the cache if the key does not exist", %{cache: cache} do
         assert cache.fetch_or_store("lazy", fn -> {:ok, "value"} end) == {:ok, "value"}
         assert cache.get!("lazy") == "value"
@@ -1124,6 +1149,97 @@ defmodule Nebulex.Adapters.LocalTest do
     end
 
     describe "race conditions and automatic retry" do
+      test "counter retains its value when the generation rotates during an increment", %{
+        cache: cache,
+        name: name
+      } do
+        assert cache.put(:counter, 10, ttl: 60_000) == :ok
+
+        Nebulex.Time
+        |> stub(:now, fn -> Mimic.call_original(Nebulex.Time, :now, []) end)
+        |> expect(:now, fn -> Mimic.call_original(Nebulex.Time, :now, []) end)
+        |> expect(:now, fn ->
+          assert new_generation(cache, name) == :ok
+
+          Mimic.call_original(Nebulex.Time, :now, [])
+        end)
+
+        assert cache.incr!(:counter) == 11
+        assert cache.get!(:counter) == 11
+
+        verify!()
+      end
+
+      for operation <- [:delete, :take, :delete_all] do
+        test "a concurrent read cannot undo #{operation}", %{cache: cache, name: name} do
+          assert cache.put(:key, :value, ttl: 60_000) == :ok
+          assert new_generation(cache, name) == :ok
+          supervisor = start_supervised!(Task.Supervisor)
+          parent = self()
+
+          stub(Nebulex.Time, :now, fn ->
+            if self() != parent do
+              send(parent, {:reading, self()})
+
+              receive do
+                :continue -> :ok
+              after
+                5000 -> raise "read was not resumed"
+              end
+            end
+
+            Mimic.call_original(Nebulex.Time, :now, [])
+          end)
+
+          task =
+            Task.Supervisor.async_nolink(supervisor, fn ->
+              cache.with_dynamic_cache(name, fn -> cache.get!(:key) end)
+            end)
+
+          assert_receive {:reading, reader}, 5000
+
+          case unquote(operation) do
+            :delete -> assert cache.delete(:key) == :ok
+            :take -> assert cache.take(:key) == {:ok, :value}
+            :delete_all -> assert cache.delete_all!(in: [:key]) == 1
+          end
+
+          send(reader, :continue)
+          _ = Task.await(task)
+
+          assert cache.get!(:key) == nil
+        end
+      end
+
+      test "concurrent readers and increments preserve every counter update", %{
+        cache: cache,
+        name: name
+      } do
+        assert cache.put(:counter, 0) == :ok
+        supervisor = start_supervised!(Task.Supervisor)
+
+        for _ <- 1..3 do
+          assert new_generation(cache, name) == :ok
+
+          tasks =
+            for _ <- 1..8 do
+              Task.Supervisor.async_nolink(supervisor, fn ->
+                cache.with_dynamic_cache(name, fn ->
+                  for _ <- 1..50 do
+                    assert is_integer(cache.get!(:counter))
+
+                    cache.incr!(:counter)
+                  end
+                end)
+              end)
+            end
+
+          _ = Task.await_many(tasks)
+        end
+
+        assert cache.get!(:counter) == 1200
+      end
+
       test "count_all and stream with {:in, keys} retry when a generation is gone", %{
         cache: cache,
         name: name

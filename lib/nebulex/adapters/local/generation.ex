@@ -408,11 +408,11 @@ defmodule Nebulex.Adapters.Local.Generation do
         # operations.
         _ref = Process.send_after(self(), {:cleanup_older_gen, older}, gc_cleanup_delay)
 
-        # Get size of older generation.
-        size = with_retry(fn -> backend.info(older, :size) end)
+        # Get size of older generation when statistics are enabled.
+        size = stats_counter && with_retry(fn -> backend.info(older, :size) end)
 
         # Since the older generation is deleted, update evictions count.
-        :ok = Stats.incr(stats_counter, :evictions, size)
+        if stats_counter, do: Stats.incr(stats_counter, :evictions, size), else: :ok
 
       [newer] ->
         # Update generations.
