@@ -1145,6 +1145,77 @@ defmodule Nebulex.Adapters.LocalTest do
     end
 
     describe "race conditions and automatic retry" do
+      test "counter keeps its value when the generation rotates during an increment", %{
+        cache: cache,
+        name: name
+      } do
+        assert cache.put(:counter, 10, ttl: 60_000) == :ok
+
+        # The second call is the expiry check after the lookup; rotate there.
+        Nebulex.Time
+        |> stub(:now, fn -> Mimic.call_original(Nebulex.Time, :now, []) end)
+        |> expect(:now, fn -> Mimic.call_original(Nebulex.Time, :now, []) end)
+        |> expect(:now, fn ->
+          assert new_generation(cache, name) == :ok
+
+          Mimic.call_original(Nebulex.Time, :now, [])
+        end)
+
+        assert cache.incr!(:counter) == 11
+        assert cache.get!(:counter) == 11
+
+        verify!()
+      end
+
+      test "incr starts the counter over when a delete removes it mid-increment", %{
+        cache: cache,
+        name: name
+      } do
+        assert cache.put(:counter, 10, ttl: 60_000) == :ok
+
+        :ok = pause_other_processes_on_now(self())
+
+        task = task_async(cache, name, fn -> cache.incr!(:counter) end)
+
+        # The first pause is the timestamp for the default entry, the second
+        # one is the expiry check after the lookup found the counter.
+        assert_receive {:paused, pid}, 5000
+        send(pid, :continue)
+        assert_receive {:paused, ^pid}, 5000
+        assert cache.delete(:counter) == :ok
+        send(pid, :continue)
+
+        assert Task.await(task) == 1
+
+        assert cache.get!(:counter) == 1
+      end
+
+      test "concurrent reads and increments between rotations keep every update", %{
+        cache: cache,
+        name: name
+      } do
+        assert cache.put(:counter, 0) == :ok
+
+        for _ <- 1..3 do
+          assert new_generation(cache, name) == :ok
+
+          tasks =
+            for _ <- 1..8 do
+              task_async(cache, name, fn ->
+                for _ <- 1..50 do
+                  assert is_integer(cache.get!(:counter))
+
+                  cache.incr!(:counter)
+                end
+              end)
+            end
+
+          _ = Task.await_many(tasks)
+        end
+
+        assert cache.get!(:counter) == 1200
+      end
+
       test "lazy expiration keeps a value written after the expired entry was read", %{
         cache: cache,
         name: name

@@ -318,13 +318,15 @@ defmodule Nebulex.Adapters.Local do
     inline: [
       fetch_entry: 4,
       pop_entry: 4,
-      list_gen: 1,
-      newer_gen: 1
+      list_gen: 1
     ]
   ]
 
   # Max number of attempts for an operation that hits a deleted generation.
   @max_retries 3
+
+  # Attempts for an increment that loses a key race (see `do_update_counter/7`).
+  @max_counter_attempts 3
 
   # Cache Entry.
   defrecord(:entry,
@@ -564,26 +566,41 @@ defmodule Nebulex.Adapters.Local do
         ttl,
         _opts
       ) do
+    now = Time.now()
+    default_entry = entry(key: key, value: default, touched: now, exp: exp(now, ttl))
+
     with_retry(fn ->
-      # Current time.
-      now = Time.now()
-
-      # Verify if the key has expired.
-      _ =
-        meta_tab
-        |> list_gen()
-        |> do_fetch(name, backend, key)
-
-      # Run the counter operation.
       meta_tab
-      |> newer_gen()
-      |> backend.update_counter(
-        key,
-        {3, amount},
-        entry(key: key, value: default, touched: now, exp: exp(now, ttl))
-      )
+      |> do_update_counter(name, backend, key, amount, default_entry, @max_counter_attempts)
       |> wrap_ok()
     end)
+  end
+
+  # The lookup resets an expired counter and promotes one found in the older
+  # generation. The increment runs on the same generation list, so a GC
+  # rotation in between cannot send it to a new, empty generation. If the key
+  # is removed between the lookup and the increment (a `delete`, a `take`, or
+  # a promotion into a newer generation), `update_counter/3` raises and the
+  # operation starts over at once: losing a key race needs no wait. A deleted
+  # table or a non-integer value raises the same `badarg` and also starts
+  # over at once; only the last attempt falls back to `with_retry/1`. The last
+  # attempt creates the counter from the default instead, which loses the
+  # increment if a GC rotation moved the counter out of that generation.
+  defp do_update_counter(meta_tab, name, backend, key, amount, default_entry, attempts) do
+    [newer | _] = generations = list_gen(meta_tab)
+
+    case do_fetch(generations, name, backend, key) do
+      {:ok, _} when attempts > 1 ->
+        try do
+          backend.update_counter(newer, key, {3, amount})
+        catch
+          :error, :badarg ->
+            do_update_counter(meta_tab, name, backend, key, amount, default_entry, attempts - 1)
+        end
+
+      _ ->
+        backend.update_counter(newer, key, {3, amount}, default_entry)
+    end
   end
 
   @impl true
@@ -932,12 +949,6 @@ defmodule Nebulex.Adapters.Local do
 
   defp pop_entry(name, backend, tab, key) do
     backend_call(name, backend, tab, :take, key)
-  end
-
-  defp newer_gen(meta_tab) do
-    meta_tab
-    |> Metadata.fetch!(:generations)
-    |> hd()
   end
 
   defp exp(_now, :infinity), do: :infinity
