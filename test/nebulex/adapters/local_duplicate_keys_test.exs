@@ -57,6 +57,20 @@ defmodule Nebulex.Adapters.LocalDuplicateKeysTest do
       end)
     end
 
+    test "get promotes all the entries under a key from the older generation", %{
+      caches: caches
+    } do
+      for_all_caches(caches, fn cache ->
+        :ok = cache.put_all(a: 1, a: 2)
+        :ok = cache.new_generation()
+
+        assert cache.get!(:a) == [1, 2]
+        assert cache.get!(:a) == [1, 2]
+
+        assert cache.count_all!(in: [:a]) == 2
+      end)
+    end
+
     test "take!", %{caches: caches} do
       for_all_caches(caches, fn cache ->
         :ok = cache.put_all(a: 1, a: 2, a: 2, b: 1, b: 2, c: 1)
