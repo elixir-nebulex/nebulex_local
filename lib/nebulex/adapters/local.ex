@@ -50,6 +50,24 @@ defmodule Nebulex.Adapters.Local do
   at once, but its tables are deleted only after the delay. The delay does not
   keep the retired entries available to new operations.
 
+  A read that finds an entry in the older generation moves it into the newer
+  one (promotion). Promotion never overwrites a value a concurrent write has
+  stored in the newer generation, and a read that overlaps a `delete`,
+  `take`, or `delete_all` with `{:in, keys}` does not restore the removed
+  entry: promotion checks that the entry is still in the older generation,
+  and replaces its copy with what it finds there (nothing, after a removal).
+  The removals visit the older generation first, so an entry being promoted
+  cannot slip past them. These guarantees have limits:
+
+    * A third operation, such as `incr` or `touch`, that changes the promoted
+      copy before promotion replaces it wins over the check.
+    * A write that read the generations before a GC rotation updates the
+      entry in what is now the older generation. Promotion keeps that
+      update, so a `delete` overlapping both can see the entry come back.
+    * The `:bag` and `:duplicate_bag` table types, and the bulk writes and
+      removals (`put_all`, `put_new_all`, and `delete_all` with a match-spec
+      query), are not covered.
+
   ## Configuration options
 
   The following options can be used to configure the adapter:
@@ -530,11 +548,17 @@ defmodule Nebulex.Adapters.Local do
     put_new_entries(meta_tab, backend, entries)
   end
 
+  # Generations are newest-first; delete from the older one first, so an
+  # entry that a `fetch` promotes while the delete runs is still removed:
+  # either the promotion took it from the older generation before the delete
+  # got there, and the delete then removes it from the newer one, or the
+  # promotion finds it gone and undoes itself.
   @impl true
   def delete(adapter_meta, key, _opts) do
     with_retry(fn ->
       adapter_meta.meta_tab
       |> list_gen()
+      |> Enum.reverse()
       |> Enum.each(&adapter_meta.backend.delete(&1, key))
     end)
   end
@@ -549,12 +573,22 @@ defmodule Nebulex.Adapters.Local do
   defp do_take(meta_tab, backend, name, key) do
     meta_tab
     |> list_gen()
-    |> Enum.reduce_while(nil, fn gen, _acc ->
-      case pop_entry(name, backend, gen, key) do
-        {:ok, res} -> {:halt, return({:ok, res}, :value)}
-        error -> {:cont, error}
-      end
-    end)
+    |> take_entry(name, backend, key)
+    |> return(:value)
+  end
+
+  defp take_entry([newer], name, backend, key) do
+    pop_entry(name, backend, newer, key)
+  end
+
+  defp take_entry([newer, older], name, backend, key) do
+    with {:error, _} <- pop_entry(name, backend, newer, key),
+         {:error, _} = error <- pop_entry(name, backend, older, key) do
+      # A concurrent read may have promoted the entry into the newer
+      # generation between the two lookups; take it from there before
+      # reporting a miss.
+      with {:error, _} <- pop_entry(name, backend, newer, key), do: error
+    end
   end
 
   @impl true
@@ -979,10 +1013,41 @@ defmodule Nebulex.Adapters.Local do
   end
 
   # An entry found in the older generation is moved into the newer one. The
-  # entry is inserted into the newer generation first and deleted from the
+  # entry is inserted into the newer generation first and removed from the
   # older one after, so the entry is visible in at least one generation at
   # all times. `insert_new/2` makes sure the promotion does not override a
-  # value a concurrent write may have already stored for the same key.
+  # value a concurrent write may have already stored for the same key; in
+  # that case the older generation is left to that write.
+  #
+  # Taking the key back from the older generation tells whether the entry
+  # changed after the lookup. If it did, our copy is stale: a `delete`,
+  # `take`, or `put` removed the entry, or a write that read the generations
+  # before a rotation updated it in place. The copy is replaced with whatever
+  # was taken (nothing, after a removal), and the newer generation is read
+  # again. `delete_object/2` and `insert_new/2` leave alone a value another
+  # write stored in the meantime. Without this check, the copy would restore
+  # an entry deleted in the meantime. Two cases still slip through: a third
+  # operation changing our copy before it is replaced (an `incr` or a
+  # `touch`), and a `delete` overlapping a stale write that we take back and
+  # reinsert; keeping that write is the lesser evil, since dropping it would
+  # lose the entry. Bag tables keep the plain move.
+  defp maybe_promote_entry({:ok, cached}, name, backend, newer, older, key)
+       when is_tuple(cached) do
+    with true <- backend.insert_new(newer, cached),
+         [^cached] <- backend.take(older, key) do
+      {:ok, cached}
+    else
+      false ->
+        {:ok, cached}
+
+      taken ->
+        true = backend.delete_object(newer, cached)
+        _ = backend.insert_new(newer, taken)
+
+        fetch_entry(name, backend, newer, key)
+    end
+  end
+
   defp maybe_promote_entry({:ok, cached}, _name, backend, newer, older, key) do
     _ = backend.insert_new(newer, cached)
     true = backend.delete(older, key)

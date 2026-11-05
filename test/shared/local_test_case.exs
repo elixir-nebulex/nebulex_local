@@ -1216,6 +1216,111 @@ defmodule Nebulex.Adapters.LocalTest do
         assert cache.get!(:counter) == 1200
       end
 
+      for operation <- [:delete, :take, :delete_all, :put] do
+        test "a read paused before promoting an entry does not undo a concurrent #{operation}",
+             %{cache: cache, name: name} do
+          assert cache.put(:key, :value, ttl: 60_000) == :ok
+          assert new_generation(cache, name) == :ok
+
+          :ok = pause_other_processes_on_now(self())
+
+          # The reader pauses after finding the entry in the older generation.
+          reader = task_async(cache, name, fn -> cache.get!(:key) end)
+
+          assert_receive {:paused, pid}, 5000
+
+          expected =
+            case unquote(operation) do
+              :delete ->
+                assert cache.delete(:key) == :ok
+
+                nil
+
+              :take ->
+                assert cache.take(:key) == {:ok, :value}
+
+                nil
+
+              :delete_all ->
+                assert cache.delete_all!(in: [:key]) == 1
+
+                nil
+
+              :put ->
+                assert cache.put(:key, :new) == :ok
+
+                :new
+            end
+
+          # The reader may return either value; only the stored one matters.
+          send(pid, :continue)
+          _ = Task.await(reader)
+
+          assert cache.get!(:key) == expected
+        end
+      end
+
+      test "a read paused before promoting an entry keeps a write made in the older generation",
+           %{cache: cache, name: name} do
+        assert cache.put(:counter, 10, ttl: 60_000) == :ok
+        assert new_generation(cache, name) == :ok
+
+        %{meta_tab: meta_tab} = Adapter.lookup_meta(name)
+        [_newer, older] = cache.with_dynamic_cache(name, fn -> cache.generations() end)
+
+        :ok = pause_other_processes_on_now(self())
+
+        reader = task_async(cache, name, fn -> cache.get!(:counter) end)
+
+        assert_receive {:paused, pid}, 5000
+
+        # A write that read the generations before a rotation updates the
+        # entry in what is now the older generation.
+        stub(Metadata, :fetch!, &Mimic.call_original(Metadata, :fetch!, [&1, &2]))
+        expect(Metadata, :fetch!, fn ^meta_tab, :generations -> [older] end)
+        assert cache.incr!(:counter) == 11
+
+        # The reader pauses again when it reads the updated entry back.
+        send(pid, :continue)
+        assert_receive {:paused, ^pid}, 5000
+        send(pid, :continue)
+        assert Task.await(reader) == 11
+
+        assert cache.get!(:counter) == 11
+
+        verify!()
+      end
+
+      for operation <- [:delete, :take, :delete_all] do
+        test "concurrent promoting reads do not keep entries alive past #{operation}", %{
+          cache: cache,
+          name: name
+        } do
+          keys = Enum.to_list(1..2000)
+
+          for _ <- 1..10 do
+            :ok = cache.put_all(for k <- keys, do: {k, k})
+
+            assert new_generation(cache, name) == :ok
+
+            # Reads promote the keys while the operation removes them, in the
+            # same order, so they keep landing on the same key at once.
+            reader = task_async(cache, name, fn -> Enum.each(keys, &cache.get!/1) end)
+
+            _ =
+              case unquote(operation) do
+                :delete -> Enum.each(keys, &cache.delete!/1)
+                :take -> Enum.each(keys, &cache.take(&1))
+                :delete_all -> Enum.each(keys, &cache.delete_all!(in: [&1]))
+              end
+
+            :ok = Task.await(reader)
+
+            assert cache.count_all!(in: keys) == 0
+          end
+        end
+      end
+
       test "lazy expiration keeps a value written after the expired entry was read", %{
         cache: cache,
         name: name
