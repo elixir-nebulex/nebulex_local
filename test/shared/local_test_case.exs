@@ -114,6 +114,27 @@ defmodule Nebulex.Adapters.LocalTest do
         assert cache.incr!(:counter, 2) == 3
       end
 
+      test "replace sets an explicit tag and keeps an omitted one", %{cache: cache, name: name} do
+        for older? <- [false, true], keep_ttl? <- [false, true] do
+          assert cache.put(:tagged, :old, tag: :original) == :ok
+
+          if older?, do: assert(new_generation(cache, name) == :ok)
+
+          assert cache.replace!(:tagged, :new, tag: :changed, keep_ttl: keep_ttl?) == true
+          assert cache.count_all!(query: match_spec(tag: t, where: t == :changed)) == 1
+          assert cache.get!(:tagged) == :new
+
+          assert cache.replace!(:tagged, :kept, keep_ttl: keep_ttl?) == true
+          assert cache.count_all!(query: match_spec(tag: t, where: t == :changed)) == 1
+          assert cache.get!(:tagged) == :kept
+
+          assert cache.replace!(:tagged, :cleared, tag: nil, keep_ttl: keep_ttl?) == true
+          assert cache.count_all!(query: match_spec(tag: t, where: t == nil)) == 1
+
+          assert cache.get!(:tagged) == :cleared
+        end
+      end
+
       test "fetch_or_store stores the value in the cache if the key does not exist", %{cache: cache} do
         assert cache.fetch_or_store("lazy", fn -> {:ok, "value"} end) == {:ok, "value"}
         assert cache.get!("lazy") == "value"

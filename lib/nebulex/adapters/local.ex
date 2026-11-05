@@ -494,8 +494,8 @@ defmodule Nebulex.Adapters.Local do
          keep_ttl?,
          has_tag?
        ) do
-    changes = if has_tag?, do: [], else: [{6, tag}]
-    changes = if keep_ttl?, do: changes, else: [{4, touched}, {5, exp}]
+    changes = if has_tag?, do: [{6, tag}], else: []
+    changes = if keep_ttl?, do: changes, else: [{4, touched}, {5, exp} | changes]
 
     update_entry(meta_tab, backend, key, [{3, value} | changes])
   end
