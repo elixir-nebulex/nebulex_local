@@ -905,7 +905,9 @@ defmodule Nebulex.Adapters.Local do
 
   defp validate_exp(entry(key: key, exp: exp) = entry, backend, tab, name) do
     if Time.now() >= exp do
-      true = backend.delete(tab, key)
+      # Delete the expired object only; a concurrent write may have already
+      # stored a new value under the same key.
+      true = backend.delete_object(tab, entry)
 
       wrap_error Nebulex.KeyError, key: key, cache: name, reason: :expired
     else
