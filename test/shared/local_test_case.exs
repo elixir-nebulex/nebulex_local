@@ -1145,6 +1145,26 @@ defmodule Nebulex.Adapters.LocalTest do
     end
 
     describe "race conditions and automatic retry" do
+      test "lazy expiration keeps a value written after the expired entry was read", %{
+        cache: cache,
+        name: name
+      } do
+        assert cache.put(:key, :expired, ttl: 1) == :ok
+
+        :ok = Process.sleep(10)
+        :ok = pause_other_processes_on_now(self())
+
+        reader = task_async(cache, name, fn -> cache.get!(:key) end)
+
+        assert_receive {:paused, pid}, 5000
+        assert cache.put(:key, :fresh) == :ok
+
+        send(pid, :continue)
+        assert Task.await(reader) == nil
+
+        assert cache.get!(:key) == :fresh
+      end
+
       test "count_all and stream with {:in, keys} retry when a generation is gone", %{
         cache: cache,
         name: name
@@ -1416,6 +1436,29 @@ defmodule Nebulex.Adapters.LocalTest do
     end
 
     ## Helpers
+
+    # Pauses every call to `Nebulex.Time.now/0` from a process other than
+    # `parent` until `parent` sends `:continue`; the paused process reports
+    # itself with `{:paused, pid}`. The expiry check calls `now/0` right after
+    # a lookup, so a reader pauses with the entry it found.
+    defp pause_other_processes_on_now(parent) do
+      _ =
+        stub(Nebulex.Time, :now, fn ->
+          if self() != parent do
+            send(parent, {:paused, self()})
+
+            receive do
+              :continue -> :ok
+            after
+              5000 -> raise "the paused process was not resumed"
+            end
+          end
+
+          Mimic.call_original(Nebulex.Time, :now, [])
+        end)
+
+      :ok
+    end
 
     defp new_generation(cache, name) do
       cache.with_dynamic_cache(name, fn ->
